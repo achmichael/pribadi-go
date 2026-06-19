@@ -13,6 +13,17 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// resolveLibPath resolves the library path relative to the whisper binary.
+// It looks for a "lib" directory next to the binary's parent directory.
+func resolveLibPath(whisperBinPath string) string {
+	absBin, err := filepath.Abs(whisperBinPath)
+	if err != nil {
+		return ""
+	}
+	// bin is at e.g. /project/bin/whisper → lib at /project/lib
+	return filepath.Join(filepath.Dir(filepath.Dir(absBin)), "lib")
+}
+
 // TranscriptionService defines the interface for audio transcription
 type TranscriptionService interface {
 	Transcribe(ctx context.Context, audioBytes []byte) (string, error)
@@ -73,7 +84,6 @@ func (s *transcriptionService) Transcribe(ctx context.Context, audioBytes []byte
 	outputBaseName := strings.TrimSuffix(filepath.Base(tempWavPath), filepath.Ext(tempWavPath))
 	outputTxtPath := filepath.Join(outputDir, outputBaseName+".txt")
 
-	// Ensure output file is cleaned up
 	defer func() {
 		if _, err := os.Stat(outputTxtPath); err == nil {
 			if err := os.Remove(outputTxtPath); err != nil {
@@ -90,6 +100,10 @@ func (s *transcriptionService) Transcribe(ctx context.Context, audioBytes []byte
 		"--output-txt",
 		"--file", tempWavPath,
 	)
+
+	// Set LD_LIBRARY_PATH so whisper can find its shared libraries
+	libPath := resolveLibPath(s.whisperBinPath)
+	cmd.Env = append(os.Environ(), "LD_LIBRARY_PATH="+libPath)
 
 	// Capture output for logging
 	var stdout, stderr strings.Builder
@@ -117,7 +131,8 @@ func (s *transcriptionService) Transcribe(ctx context.Context, audioBytes []byte
 		Msg("Whisper execution output")
 
 	// Read transcription output
-	transcriptBytes, err := os.ReadFile(outputTxtPath)
+	audioPath := tempWavPath + ".txt"
+	transcriptBytes, err := os.ReadFile(audioPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read transcription output: %w", err)
 	}
