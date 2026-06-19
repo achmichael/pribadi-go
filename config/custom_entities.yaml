@@ -1,0 +1,8 @@
+entities:
+  - name: "CatatanKalori"
+    description: "Digunakan untuk mencatat makanan dan jumlah kalori."
+    fields:
+      - name: "makanan"
+        type: "string"
+      - name: "kalori"
+        type: "number"

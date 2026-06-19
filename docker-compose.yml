@@ -1,0 +1,99 @@
+services:
+  ollama:
+    image: ollama/ollama:0.30.7
+    container_name: ollama_engine
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  # Vector Database (Untuk RAG Pipeline)
+  qdrant:
+    image: qdrant/qdrant:v1.18.0
+    container_name: qdrant_db
+    ports:
+      - "6333:6333" # REST API
+      - "6334:6334" # gRPC (Sangat direkomendasikan untuk Golang karena jauh lebih cepat)
+    volumes:
+      - ./qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  # Database Tunggal (PostgreSQL Alpine - Hemat RAM untuk Device Lokal)
+  postgres_db:
+    image: postgres:16-alpine
+    container_name: local_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=app_dev
+      - POSTGRES_PASSWORD=secretpass_local
+      - POSTGRES_DB=app_private_db
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app_dev -d app_private_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # WhatsApp Gateway
+  evolutionapi:
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: evolution_api
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./evolutionapi_data:/evolutionapi/data
+    restart: unless-stopped
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+      redis_cache:
+        condition: service_healthy
+    environment:
+      # Kunci Enkripsi Global API
+      - AUTHENTICATION_API_KEY=42a44469-f11a-4a24-8b65-420a3203c2a6
+      - PORT=8080
+      - SERVER_URL=http://localhost:8080
+      - AUTHENTICATION_TYPE=apikey
+      # Konfigurasi Database Evolution API ke PostgreSQL
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://app_dev:secretpass_local@postgres_db:5432/app_private_db?schema=public
+
+      # Pengaturan Webhook (Arahkan ke port aplikasi Golang Anda nantinya)
+      - WEBHOOK_GLOBAL_ENABLED=true
+      - WEBHOOK_GLOBAL_URL=http://host.docker.internal:8080/v1/webhook/whatsapp
+      - WEBHOOK_EVENTS_APPLICATION_MESSAGE_UPSERT=true # Mendengarkan pesan masuk (Text, Voice, Doc)
+
+      # Optimalisasi Penyimpanan Media Lokal
+      - STORE_MESSAGES=true
+      - STORE_CHATS=true
+      - REDIS_ENABLED=true
+      - CACHE_REDIS_URI=redis://local_redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_PASSWORD=
+      - REDIS_SAVE_LOCAL_INSTANCE=false
+
+      - MANAGER_AUTHENTICATION=true
+      - MANAGER_API_KEY=42a44469-f11a-4a24-8b65-420a3203c2a6
+
+      - STORE_MESSAGES=true
+      - STORE_CHATS=true
+
+  redis_cache:
+    image: redis:7-alpine
+    container_name: local_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis_data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5

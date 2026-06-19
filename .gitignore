@@ -1,0 +1,16 @@
+postgres_data/
+redis_data/
+qdrant_data/
+ollama_data/
+data/
+models/
+.env
+phases/*
+cmd/smoketest/*
+architecture.png
+app
+assets/temp/*
+whisper.cpp/*
+whisper_server/*
+AGENTS.md
+bin/*
