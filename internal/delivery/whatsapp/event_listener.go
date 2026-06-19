@@ -77,7 +77,7 @@ func (l *EventListener) Start() {
 func (l *EventListener) handleEvent(evt interface{}) {
 	switch v := evt.(type) {
 	case *events.Message:
-		l.handleMessage(v)
+		go l.handleMessage(v)
 	}
 }
 
