@@ -90,7 +90,7 @@ func (l *EventListener) handleMessage(evt *events.Message) {
 
 	// Log incoming message
 	logEvent := l.logger.Info().
-		Str("sender", msg.SenderJID).
+		Str("sender", evt.Info.Sender.ToNonAD().String()).
 		Str("type", string(msg.MessageType)).
 		Str("id", msg.ID)
 
@@ -134,7 +134,7 @@ func (l *EventListener) handleMessage(evt *events.Message) {
 func (l *EventListener) extractMessage(evt *events.Message) IncomingMessage {
 	msg := IncomingMessage{
 		ID:         evt.Info.ID,
-		SenderJID:  evt.Info.Sender.String(),
+		SenderJID:  evt.Info.Sender.ToNonAD().ADString(),
 		Timestamp:  evt.Info.Timestamp,
 		RawMessage: evt.Message,
 	}

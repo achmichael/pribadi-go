@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // OllamaEmbeddingRequest represents the request to Ollama embeddings API
@@ -31,7 +32,9 @@ func NewOllamaEmbedder(baseURL, model string) *OllamaEmbedder {
 	return &OllamaEmbedder{
 		baseURL: baseURL,
 		model:   model,
-		client:  &http.Client{},
+		client: &http.Client{
+			Timeout: 5 * time.Minute,
+		},
 	}
 }
 

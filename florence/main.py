@@ -17,6 +17,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
+# pyrefly: ignore [missing-import]
 import torch
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse

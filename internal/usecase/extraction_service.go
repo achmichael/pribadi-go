@@ -8,10 +8,12 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/fumiama/go-docx"
+	"github.com/ledongthuc/pdf"
 	"github.com/rs/zerolog"
 )
 
@@ -21,9 +23,9 @@ type ExtractionService interface {
 }
 
 type extractionService struct {
-	logger         *zerolog.Logger
-	florenceURL    string
-	httpClient     *http.Client
+	logger      *zerolog.Logger
+	florenceURL string
+	httpClient  *http.Client
 }
 
 // NewExtractionService creates a new extraction service.
@@ -153,9 +155,84 @@ func (s *extractionService) florencePost(ctx context.Context, endpoint string, i
 	}
 }
 
-func (s *extractionService) extractFromPDF(_ context.Context, _ []byte) (string, error) {
-	s.logger.Warn().Msg("PDF text extraction not implemented")
-	return "[PDF extraction not available]", nil
+// extractFromPDF extracts text from all pages of a PDF.
+// If a page yields no text (scanned/image PDF), it falls back to Florence OCR.
+func (s *extractionService) extractFromPDF(ctx context.Context, fileBytes []byte) (string, error) {
+	start := time.Now()
+
+	// ledongthuc/pdf needs a io.ReaderAt + size — use temp file
+	tmpFile, err := os.CreateTemp("", "pdfextract-*.pdf")
+	if err != nil {
+		return "", fmt.Errorf("create temp pdf: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmpFile.Write(fileBytes); err != nil {
+		tmpFile.Close()
+		return "", fmt.Errorf("write temp pdf: %w", err)
+	}
+	tmpFile.Close()
+
+	pdfFile, reader, err := pdf.Open(tmpPath)
+	if err != nil {
+		return "", fmt.Errorf("open pdf: %w", err)
+	}
+	defer pdfFile.Close()
+
+	totalPages := reader.NumPage()
+	s.logger.Info().
+		Int("pages", totalPages).
+		Dur("parse_duration", time.Since(start)).
+		Msg("PDF opened")
+
+	var textBuilder strings.Builder
+	emptyPages := 0
+
+	for i := 1; i <= totalPages; i++ {
+		page := reader.Page(i)
+		if page.V.IsNull() {
+			emptyPages++
+			continue
+		}
+
+		pageText, err := page.GetPlainText(nil)
+		if err != nil {
+			s.logger.Warn().
+				Int("page", i).
+				Err(err).
+				Msg("Failed to extract text from PDF page")
+			emptyPages++
+			continue
+		}
+
+		trimmed := strings.TrimSpace(pageText)
+		if trimmed == "" {
+			emptyPages++
+			continue
+		}
+
+		if textBuilder.Len() > 0 {
+			textBuilder.WriteString("\n\n")
+		}
+		textBuilder.WriteString(trimmed)
+	}
+
+	// If all pages empty → likely scanned PDF, fallback to Florence vision
+	if textBuilder.Len() == 0 && emptyPages > 0 {
+		s.logger.Info().
+			Int("empty_pages", emptyPages).
+			Msg("PDF has no text layer, falling back to Florence OCR")
+		return s.extractFromImageViaFlorence(ctx, fileBytes, "image/png")
+	}
+
+	s.logger.Info().
+		Int("pages_with_text", totalPages-emptyPages).
+		Int("empty_pages", emptyPages).
+		Int("total_chars", textBuilder.Len()).
+		Msg("PDF text extraction done")
+
+	return textBuilder.String(), nil
 }
 
 // extractFromDOCX extracts text from DOCX files

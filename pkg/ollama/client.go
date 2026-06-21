@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -45,21 +46,61 @@ type OllamaClient struct {
 // NewClient creates a new Ollama client
 func NewClient(baseURL, model string) *OllamaClient {
 	return &OllamaClient{
-		baseURL:    baseURL,
-		model:      model,
-		httpClient: &http.Client{Timeout: 120 * time.Second},
+		baseURL: baseURL,
+		model:   model,
+		httpClient: &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 
-// Chat sends chat messages to Ollama
-func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
-	// Log token estimate
-	totalWords := 0
+// MaxPromptTokens is the soft cap for total prompt tokens sent to Chat.
+// Prompts exceeding this are truncated to avoid timeouts on modest hardware.
+const MaxPromptTokens = 2048
+
+// estimateTokens rough count: words * 1.3
+func estimateTokens(messages []ChatMessage) int {
+	total := 0
 	for _, m := range messages {
-		totalWords += len(strings.Fields(m.Content))
+		total += len(strings.Fields(m.Content))
 	}
-	// Estimation: 1 word ~ 1.3 tokens
-	fmt.Printf("Prompt token estimate: %d\n", int(float64(totalWords)*1.3))
+	return int(float64(total) * 1.3)
+}
+
+// truncateToWordLimit trims content to approximately maxWords words.
+func truncateToWordLimit(s string, maxWords int) string {
+	words := strings.Fields(s)
+	if len(words) <= maxWords {
+		return s
+	}
+	return strings.Join(words[:maxWords], " ") + " [truncated]"
+}
+
+// Chat sends chat messages to Ollama.
+// It enforces MaxPromptTokens by truncating the user message if needed.
+func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
+	tokenEst := estimateTokens(messages)
+	fmt.Printf("Prompt token estimate: %d\n", tokenEst)
+
+	// Guard: if prompt too large, truncate the longest message (usually user)
+	if tokenEst > MaxPromptTokens {
+		maxIdx := 0
+		maxLen := 0
+		for i, m := range messages {
+			wc := len(strings.Fields(m.Content))
+			if wc > maxLen {
+				maxLen = wc
+				maxIdx = i
+			}
+		}
+		// How many words to cut: keep total under MaxPromptTokens
+		excess := tokenEst - MaxPromptTokens
+		excessWords := int(float64(excess) / 1.3) + 10 // extra margin
+		targetWords := maxLen - excessWords
+		if targetWords < 50 {
+			targetWords = 50
+		}
+		messages[maxIdx].Content = truncateToWordLimit(messages[maxIdx].Content, targetWords)
+		fmt.Printf("Prompt truncated to ~%d tokens (was %d)\n", estimateTokens(messages), tokenEst)
+	}
 
 	reqBody := chatRequest{
 		Model:    c.model,
@@ -68,30 +109,39 @@ func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string
 	}
 
 	data, _ := json.Marshal(reqBody)
-	
+
 	// Perform request with simple retry
 	var resp *http.Response
 	var err error
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		req, _ := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/chat", bytes.NewBuffer(data))
 		req.Header.Set("Content-Type", "application/json")
-		
+
 		resp, err = c.httpClient.Do(req)
-		if err == nil && resp.StatusCode == 503 && i == 0 {
+		if err != nil {
+			// Retry on timeout/connection errors
+			if i < 2 {
+				time.Sleep(time.Duration(i+1) * 2 * time.Second)
+				continue
+			}
+			return "", fmt.Errorf("ollama chat failed after retries: %w", err)
+		}
+		if resp.StatusCode == 503 && i < 2 {
 			resp.Body.Close()
-			time.Sleep(1 * time.Second)
+			time.Sleep(time.Duration(i+1) * 2 * time.Second)
 			continue
 		}
 		break
 	}
-	
+
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ollama chat error: status %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("ollama chat error: status %d body: %s", resp.StatusCode, string(body))
 	}
 
 	var chatResp chatResponse
