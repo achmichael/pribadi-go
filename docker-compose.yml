@@ -97,3 +97,38 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  # Florence-2-large-ft – Vision Model (GPU)
+  florence:
+    build:
+      context: ./florence
+      dockerfile: Dockerfile
+    container_name: florence_vision
+    ports:
+      - "8100:8000"
+    volumes:
+      # Persist HuggingFace model weights so they survive container rebuilds
+      - ./florence_cache:/model_cache
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s

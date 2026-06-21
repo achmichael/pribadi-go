@@ -3,7 +3,11 @@ package usecase
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
 	"strings"
 	"time"
 
@@ -17,13 +21,18 @@ type ExtractionService interface {
 }
 
 type extractionService struct {
-	logger *zerolog.Logger
+	logger         *zerolog.Logger
+	florenceURL    string
+	httpClient     *http.Client
 }
 
-// NewExtractionService creates a new extraction service
-func NewExtractionService(logger *zerolog.Logger) ExtractionService {
+// NewExtractionService creates a new extraction service.
+// florenceURL is the base URL of the Florence FastAPI container, e.g. "http://localhost:8100"
+func NewExtractionService(logger *zerolog.Logger, florenceURL string) ExtractionService {
 	return &extractionService{
-		logger: logger,
+		logger:      logger,
+		florenceURL: strings.TrimRight(florenceURL, "/"),
+		httpClient:  &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
@@ -31,63 +40,128 @@ func NewExtractionService(logger *zerolog.Logger) ExtractionService {
 func (s *extractionService) ExtractText(ctx context.Context, fileBytes []byte, mimeType string) (string, error) {
 	start := time.Now()
 	defer func() {
-		duration := time.Since(start)
 		s.logger.Info().
 			Str("mime_type", mimeType).
-			Dur("duration", duration).
+			Dur("duration", time.Since(start)).
 			Msg("Text extraction completed")
 	}()
 
-	var text string
-	var err error
-
 	switch mimeType {
-	case "image/png", "image/jpeg", "image/jpg":
-		text, err = s.extractFromImage(ctx, fileBytes)
+	case "image/png", "image/jpeg", "image/jpg", "image/webp":
+		return s.extractFromImageViaFlorence(ctx, fileBytes, mimeType)
 	case "application/pdf":
-		text, err = s.extractFromPDF(ctx, fileBytes)
+		return s.extractFromPDF(ctx, fileBytes)
 	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-		text, err = s.extractFromDOCX(ctx, fileBytes)
+		return s.extractFromDOCX(ctx, fileBytes)
 	default:
 		return "", fmt.Errorf("unsupported mime type: %s", mimeType)
 	}
+}
 
-	if err != nil {
-		return "", err
+// extractFromImageViaFlorence calls the Florence-2 container HTTP API.
+// It runs detailed captioning + OCR and merges both results.
+func (s *extractionService) extractFromImageViaFlorence(ctx context.Context, fileBytes []byte, mimeType string) (string, error) {
+	// Determine file extension from mime type for multipart filename
+	ext := "jpg"
+	switch mimeType {
+	case "image/png":
+		ext = "png"
+	case "image/webp":
+		ext = "webp"
 	}
 
-	s.logger.Info().
-		Int("char_count", len(text)).
-		Str("mime_type", mimeType).
-		Msg("Text extracted successfully")
+	caption, err := s.florencePost(ctx, "/detailed-caption", fileBytes, ext)
+	if err != nil {
+		return "", fmt.Errorf("florence detailed-caption failed: %w", err)
+	}
 
-	return text, nil
+	ocrText, err := s.florencePost(ctx, "/ocr", fileBytes, ext)
+	if err != nil {
+		// OCR failure is non-fatal — proceed with caption only
+		s.logger.Warn().Err(err).Msg("Florence OCR failed, using caption only")
+		ocrText = ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("[Image Description]\n")
+	sb.WriteString(caption)
+	if ocrText != "" {
+		sb.WriteString("\n\n[Text in Image]\n")
+		sb.WriteString(ocrText)
+	}
+	return sb.String(), nil
 }
 
-// extractFromImage extracts text from images using OCR
-// Note: This is a placeholder. In production, use gosseract or HTTP call to Tesseract service
-func (s *extractionService) extractFromImage(ctx context.Context, fileBytes []byte) (string, error) {
-	s.logger.Warn().Msg("OCR extraction not fully implemented - returning placeholder")
-	
-	// TODO: Implement OCR using one of these approaches:
-	// 1. gosseract (requires CGO): github.com/otiai10/gosseract/v2
-	// 2. HTTP call to local Tesseract REST API
-	// 3. Cloud OCR service (Google Vision, AWS Textract, etc.)
-	
-	// For now, return a placeholder message
-	return "[OCR extraction not available - please implement gosseract or Tesseract REST wrapper]", nil
+// florenceResponse mirrors the JSON shapes returned by /detailed-caption and /ocr
+type florenceCaptionResp struct {
+	Caption string `json:"caption"`
+}
+type florenceOCRResp struct {
+	Text string `json:"text"`
 }
 
-func (s *extractionService) extractFromPDF(ctx context.Context, fileBytes []byte) (string, error) {
-	s.logger.Warn().Msg("PDF text extraction not fully implemented - returning placeholder")
-	return "[PDF extraction not available - please implement using a suitable PDF text extraction library]", nil
+// florencePost sends an image as multipart/form-data to the given Florence endpoint.
+func (s *extractionService) florencePost(ctx context.Context, endpoint string, imgBytes []byte, ext string) (string, error) {
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+
+	fw, err := mw.CreateFormFile("file", "image."+ext)
+	if err != nil {
+		return "", fmt.Errorf("create form file: %w", err)
+	}
+	if _, err = fw.Write(imgBytes); err != nil {
+		return "", fmt.Errorf("write form file: %w", err)
+	}
+	mw.Close()
+
+	url := s.florenceURL + endpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, &body)
+	if err != nil {
+		return "", fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("http request to %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("florence %s returned %d: %s", endpoint, resp.StatusCode, string(raw))
+	}
+
+	// Parse response based on endpoint
+	switch endpoint {
+	case "/ocr":
+		var r florenceOCRResp
+		if err := json.Unmarshal(raw, &r); err != nil {
+			return "", fmt.Errorf("parse ocr response: %w", err)
+		}
+		return r.Text, nil
+	default: // /detailed-caption, /caption
+		var r florenceCaptionResp
+		if err := json.Unmarshal(raw, &r); err != nil {
+			return "", fmt.Errorf("parse caption response: %w", err)
+		}
+		return r.Caption, nil
+	}
+}
+
+func (s *extractionService) extractFromPDF(_ context.Context, _ []byte) (string, error) {
+	s.logger.Warn().Msg("PDF text extraction not implemented")
+	return "[PDF extraction not available]", nil
 }
 
 // extractFromDOCX extracts text from DOCX files
-func (s *extractionService) extractFromDOCX(ctx context.Context, fileBytes []byte) (string, error) {
+func (s *extractionService) extractFromDOCX(_ context.Context, fileBytes []byte) (string, error) {
 	reader := bytes.NewReader(fileBytes)
-	
-	// Read DOCX file
+
 	doc, err := docx.Parse(reader, int64(len(fileBytes)))
 	if err != nil {
 		return "", fmt.Errorf("failed to parse DOCX: %w", err)
@@ -95,36 +169,28 @@ func (s *extractionService) extractFromDOCX(ctx context.Context, fileBytes []byt
 
 	var textBuilder strings.Builder
 
-	// Extract text from paragraphs
 	for _, item := range doc.Document.Body.Items {
-		switch item.(type) {
+		switch v := item.(type) {
 		case *docx.Paragraph:
-			para := item.(*docx.Paragraph)
-			for _, child := range para.Children {
-				switch child.(type) {
-				case *docx.Run:
-					run := child.(*docx.Run)
+			for _, child := range v.Children {
+				if run, ok := child.(*docx.Run); ok {
 					for _, rc := range run.Children {
-						switch rc.(type) {
-						case *docx.Text:
-							text := rc.(*docx.Text)
-							textBuilder.WriteString(text.Text)
+						if t, ok := rc.(*docx.Text); ok {
+							textBuilder.WriteString(t.Text)
 						}
 					}
 				}
 			}
 			textBuilder.WriteString("\n")
 		case *docx.Table:
-			// Extract text from tables
-			table := item.(*docx.Table)
-			for _, row := range table.TableRows {
+			for _, row := range v.TableRows {
 				for _, cell := range row.TableCells {
 					for _, para := range cell.Paragraphs {
 						for _, child := range para.Children {
 							if run, ok := child.(*docx.Run); ok {
 								for _, rc := range run.Children {
-									if text, ok := rc.(*docx.Text); ok {
-										textBuilder.WriteString(text.Text)
+									if t, ok := rc.(*docx.Text); ok {
+										textBuilder.WriteString(t.Text)
 										textBuilder.WriteString(" ")
 									}
 								}

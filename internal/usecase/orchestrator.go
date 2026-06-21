@@ -58,26 +58,46 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 	case whatsapp.MessageTypeImage, whatsapp.MessageTypeDocument:
 		var data []byte
 		var err error
+		var mime string
 		if msg.MessageType == whatsapp.MessageTypeImage {
 			imgMsg := msg.RawMessage.GetImageMessage()
 			if imgMsg != nil {
 				data, err = o.waClient.GetClient().Download(ctx, imgMsg)
+				mime = imgMsg.GetMimetype()
 			}
 		} else {
 			docMsg := msg.RawMessage.GetDocumentMessage()
 			if docMsg != nil {
 				data, err = o.waClient.GetClient().Download(ctx, docMsg)
+				mime = docMsg.GetMimetype()
 			}
 		}
 		if err != nil || data == nil {
 			return fmt.Errorf("failed to download media: %v", err)
 		}
-		text, err := o.extraction.ExtractText(ctx, data, msg.MediaMimetype)
+
+		// Use effective mime from message if IncomingMessage field is empty
+		if mime == "" {
+			mime = msg.MediaMimetype
+		}
+
+		text, err := o.extraction.ExtractText(ctx, data, mime)
 		if err != nil {
 			return err
 		}
-		_, _ = o.ragIngest.IngestText(ctx, text, map[string]string{"source_file": msg.ID})
-		userText = fmt.Sprintf("File processed: %s", msg.ID)
+
+		if msg.MessageType == whatsapp.MessageTypeImage {
+			// Image: Florence already produced rich description.
+			// Feed directly to Ollama for conversational response.
+			userText = text
+			if msg.Caption != "" {
+				userText = fmt.Sprintf("%s\n\nUser caption: %s", text, msg.Caption)
+			}
+		} else {
+			// Document: ingest into RAG then inform user
+			_, _ = o.ragIngest.IngestText(ctx, text, map[string]string{"source_file": msg.ID})
+			userText = fmt.Sprintf("Dokumen telah diproses dan disimpan. Isi:\n%s", text)
+		}
 	default:
 		userText = msg.TextContent
 	}

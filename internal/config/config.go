@@ -20,6 +20,7 @@ type Config struct {
 	LocalDiskPath    string `envconfig:"LOCAL_DISK_PATH" required:"true"`
 	WebhookSecret    string `envconfig:"WEBHOOK_SECRET" default:""`
 	NotifyJIDs       string `envconfig:"NOTIFY_JIDS" required:"true"`
+	FlorenceURL      string `envconfig:"FLORENCE_URL" default:"http://localhost:8100"`
 }
 
 // Load reads configuration from .env file and environment variables

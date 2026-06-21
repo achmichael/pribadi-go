@@ -49,7 +49,7 @@ func (s *retrievalService) Retrieve(ctx context.Context, question string) (Promp
 			sb.WriteString("\n---\n")
 		}
 		sb.WriteString(res.Content)
-		
+
 		source := res.Metadata["source_file"]
 		if source != "" {
 			sources = append(sources, source)
