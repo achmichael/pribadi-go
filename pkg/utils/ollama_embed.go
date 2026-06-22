@@ -5,46 +5,69 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"sync"
 	"time"
 )
 
-// OllamaEmbeddingRequest represents the request to Ollama embeddings API
-type OllamaEmbeddingRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
+// ollamaEmbedRequest uses the newer /api/embed endpoint (batch-capable).
+type ollamaEmbedRequest struct {
+	Model     string `json:"model"`
+	Input     string `json:"input"`
+	KeepAlive string `json:"keep_alive"`
 }
 
-// OllamaEmbeddingResponse represents the response from Ollama embeddings API
-type OllamaEmbeddingResponse struct {
-	Embedding []float32 `json:"embedding"`
+// ollamaEmbedResponse matches /api/embed response.
+type ollamaEmbedResponse struct {
+	Embeddings [][]float32 `json:"embeddings"`
 }
 
-// OllamaEmbedder provides embedding functionality using Ollama
+// Legacy types kept for backward compatibility with chromem-go callback.
+type OllamaEmbeddingRequest = ollamaEmbedRequest
+type OllamaEmbeddingResponse = ollamaEmbedResponse
+
+// OllamaEmbedder provides embedding functionality using Ollama.
 type OllamaEmbedder struct {
-	baseURL string
-	model   string
-	client  *http.Client
+	baseURL   string
+	model     string
+	client    *http.Client
+	cache     sync.Map          // simple query→embedding cache
+	keepAlive string            // Ollama keep_alive duration string
 }
 
-// NewOllamaEmbedder creates a new Ollama embedder
+// NewOllamaEmbedder creates a new Ollama embedder.
 func NewOllamaEmbedder(baseURL, model string) *OllamaEmbedder {
 	return &OllamaEmbedder{
-		baseURL: baseURL,
-		model:   model,
+		baseURL:   baseURL,
+		model:     model,
+		keepAlive: "30m", // keep model loaded 30 min to avoid cold-start
 		client: &http.Client{
 			Timeout: 2 * time.Minute,
 		},
 	}
 }
 
-// Embed generates embeddings for the given text using Ollama
-func (e *OllamaEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
+// Warmup preloads the embedding model into Ollama memory so first real
+// request doesn't pay cold-start penalty (~60s → <1s).
+func (e *OllamaEmbedder) Warmup(ctx context.Context) error {
+	_, err := e.Embed(ctx, "warmup")
+	return err
+}
+
+// Embed generates embeddings for the given text using Ollama /api/embed.
+func (e *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+	// Check cache first (useful for repeated identical queries).
+	if cached, ok := e.cache.Load(text); ok {
+		return cached.([]float32), nil
+	}
+
 	start := time.Now()
 
-	reqBody := OllamaEmbeddingRequest{
-		Model:  e.model,
-		Prompt: text,
+	reqBody := ollamaEmbedRequest{
+		Model:     e.model,
+		Input:     text,
+		KeepAlive: e.keepAlive,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -52,8 +75,7 @@ func (e *OllamaEmbedder) Embed(_ context.Context, text string) ([]float32, error
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Use background context for the HTTP call since we manage timeout via client
-	req, err := http.NewRequest("POST", e.baseURL+"/api/embeddings", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", e.baseURL+"/api/embed", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -67,16 +89,26 @@ func (e *OllamaEmbedder) Embed(_ context.Context, text string) ([]float32, error
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ollama embedding API returned status %d (text_len=%d, elapsed=%s)",
-			resp.StatusCode, len(text), time.Since(start))
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ollama embed API status %d (text_len=%d, elapsed=%s): %s",
+			resp.StatusCode, len(text), time.Since(start), string(body))
 	}
 
-	var embeddingResp OllamaEmbeddingResponse
-	if err := json.NewDecoder(resp.Body).Decode(&embeddingResp); err != nil {
+	var embedResp ollamaEmbedResponse
+	if err := json.NewDecoder(resp.Body).Decode(&embedResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	_ = time.Since(start) // available for caller logging
+	if len(embedResp.Embeddings) == 0 {
+		return nil, fmt.Errorf("empty embeddings returned (text_len=%d)", len(text))
+	}
 
-	return embeddingResp.Embedding, nil
+	result := embedResp.Embeddings[0]
+
+	// Cache result for short queries (likely search queries, not documents).
+	if len(text) < 500 {
+		e.cache.Store(text, result)
+	}
+
+	return result, nil
 }

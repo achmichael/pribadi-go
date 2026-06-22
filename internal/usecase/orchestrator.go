@@ -42,7 +42,7 @@ func NewOrchestrator(
 }
 
 // maxContextChars caps how much RAG context goes into the system prompt.
-const maxContextChars = 6000
+const maxContextChars = 3000
 
 func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage) error {
 	handleStart := time.Now()

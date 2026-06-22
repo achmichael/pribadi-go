@@ -20,10 +20,11 @@ type ChatMessage struct {
 }
 
 type chatRequest struct {
-	Model    string            `json:"model"`
-	Messages []ChatMessage     `json:"messages"`
-	Stream   bool              `json:"stream"`
-	Options  map[string]any    `json:"options,omitempty"`
+	Model     string            `json:"model"`
+	Messages  []ChatMessage     `json:"messages"`
+	Stream    bool              `json:"stream"`
+	Options   map[string]any    `json:"options,omitempty"`
+	KeepAlive string            `json:"keep_alive,omitempty"`
 }
 
 type chatResponse struct {
@@ -31,8 +32,9 @@ type chatResponse struct {
 }
 
 type embeddingRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
+	Model     string `json:"model"`
+	Prompt    string `json:"prompt"`
+	KeepAlive string `json:"keep_alive,omitempty"`
 }
 
 type embeddingResponse struct {
@@ -78,6 +80,14 @@ func truncateToWordLimit(s string, maxWords int) string {
 	return strings.Join(words[:maxWords], " ") + " [truncated]"
 }
 
+// Warmup preloads the chat model into Ollama memory.
+func (c *OllamaClient) Warmup(ctx context.Context) error {
+	_, err := c.Chat(ctx, []ChatMessage{
+		{Role: "user", Content: "hi"},
+	})
+	return err
+}
+
 // Chat sends chat messages to Ollama.
 func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
 	tokenEst := estimateTokens(messages)
@@ -117,9 +127,11 @@ func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string
 		Messages: messages,
 		Stream:   false,
 		Options: map[string]any{
-			"num_predict": 300, // cap output tokens to prevent verbose replies
+			"num_predict": 200,  // reduced: shorter replies = faster
 			"temperature": 0.7,
+			"num_ctx":     2048, // limit context window for speed
 		},
+		KeepAlive: "30m", // keep model loaded 30 min
 	}
 
 	data, _ := json.Marshal(reqBody)
@@ -200,7 +212,7 @@ func (c *OllamaClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 	start := time.Now()
 	textLen := len(text)
 
-	reqBody := embeddingRequest{Model: c.model, Prompt: text}
+	reqBody := embeddingRequest{Model: c.model, Prompt: text, KeepAlive: "30m"}
 	data, _ := json.Marshal(reqBody)
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/embeddings", bytes.NewBuffer(data))
