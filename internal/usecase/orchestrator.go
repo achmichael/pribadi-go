@@ -141,8 +141,43 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 			}
 		} else {
 			// Document: ingest into RAG, reply with confirmation only.
+			
+			// === EXTRACT METADATA VIA LLM ===
+			metaStart := time.Now()
+			metadata := map[string]string{"source_file": msg.ID}
+			
+			extractText := text
+			if len(extractText) > 2000 {
+				extractText = extractText[:2000]
+			}
+			
+			metaPrompt := "Extract the Title and Author from the following document text. If not found, output 'Unknown'. Format exactly as:\nTitle: [Title]\nAuthor: [Author]\n\nDocument text:\n" + extractText
+			metaMessages := []ollama.ChatMessage{
+				{Role: "user", Content: metaPrompt},
+			}
+			
+			metaReply, err := o.ollama.Chat(ctx, metaMessages)
+			if err == nil {
+				for _, line := range strings.Split(metaReply, "\n") {
+					line = strings.TrimSpace(line)
+					lowerLine := strings.ToLower(line)
+					if strings.HasPrefix(lowerLine, "title:") {
+						metadata["Title"] = strings.TrimSpace(line[6:])
+					} else if strings.HasPrefix(lowerLine, "author:") {
+						metadata["Author"] = strings.TrimSpace(line[7:])
+					}
+				}
+			} else {
+				o.logger.Warn().Err(err).Msg("[orchestrator] metadata extraction failed, using default")
+			}
+			
+			o.logger.Info().
+				Str("msg_id", msg.ID).
+				Dur("duration_ms", time.Since(metaStart)).
+				Msg("[orchestrator] LLM metadata extraction done")
+
 			ingStart := time.Now()
-			count, _ := o.ragIngest.IngestText(ctx, text, map[string]string{"source_file": msg.ID})
+			count, _ := o.ragIngest.IngestText(ctx, text, metadata)
 			o.logger.Info().
 				Str("msg_id", msg.ID).
 				Int("chunks_stored", count).
@@ -152,7 +187,7 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 
 			sendStart := time.Now()
 			summary := fmt.Sprintf("✅ Dokumen berhasil diproses.\n📄 %d bagian disimpan ke memori.\n\nKamu bisa langsung bertanya tentang isi dokumen ini.", count)
-			err := o.waClient.SendText(ctx, msg.SenderJID, summary)
+			err = o.waClient.SendText(ctx, msg.SenderJID, summary)
 			o.logger.Info().
 				Str("msg_id", msg.ID).
 				Dur("duration_ms", time.Since(sendStart)).
