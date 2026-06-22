@@ -7,9 +7,12 @@ import (
 	"time"
 
 	"github.com/achmichael/pribadi-go/internal/delivery/whatsapp"
+	"github.com/achmichael/pribadi-go/internal/factmemory"
+	"github.com/achmichael/pribadi-go/internal/identity"
 	"github.com/achmichael/pribadi-go/internal/repository"
 	"github.com/achmichael/pribadi-go/internal/usecase/rag"
 	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
 
@@ -25,6 +28,9 @@ type orchestrator struct {
 	ragRetrieve   rag.RetrievalService
 	ollama        *ollama.OllamaClient
 	repo          repository.Repository
+	memory        factmemory.MemoryManager
+	resolver      *identity.Resolver
+	refResolver   ReferenceResolver
 	logger        *zerolog.Logger
 }
 
@@ -36,9 +42,24 @@ func NewOrchestrator(
 	ragRetrieve rag.RetrievalService,
 	ollamaClient *ollama.OllamaClient,
 	repo repository.Repository,
+	memory factmemory.MemoryManager,
+	resolver *identity.Resolver,
+	refResolver ReferenceResolver,
 	logger *zerolog.Logger,
 ) Orchestrator {
-	return &orchestrator{waClient, transcription, extraction, ragIngest, ragRetrieve, ollamaClient, repo, logger}
+	return &orchestrator{
+		waClient:      waClient,
+		transcription: transcription,
+		extraction:    extraction,
+		ragIngest:     ragIngest,
+		ragRetrieve:   ragRetrieve,
+		ollama:        ollamaClient,
+		repo:          repo,
+		memory:        memory,
+		resolver:      resolver,
+		refResolver:   refResolver,
+		logger:        logger,
+	}
 }
 
 // maxContextChars caps how much RAG context goes into the system prompt.
@@ -51,6 +72,15 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 		Str("sender", msg.SenderJID).
 		Str("type", string(msg.MessageType)).
 		Msg("[orchestrator] handle start")
+
+	// ── 0. Resolve platform identity → internal UserID ─────────────
+	userID, err := o.resolver.ResolveUserID(ctx, "whatsapp", msg.SenderJID)
+	if err != nil {
+		o.logger.Error().Err(err).
+			Str("sender", msg.SenderJID).
+			Msg("[orchestrator] user resolution failed")
+		return fmt.Errorf("resolve user: %w", err)
+	}
 
 	var userText string
 
@@ -91,25 +121,25 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 	case whatsapp.MessageTypeImage, whatsapp.MessageTypeDocument:
 		// 1a. Download media
 		var data []byte
-		var err error
+		var dlErr error
 		var mime string
 
 		dlStart := time.Now()
 		if msg.MessageType == whatsapp.MessageTypeImage {
 			imgMsg := msg.RawMessage.GetImageMessage()
 			if imgMsg != nil {
-				data, err = o.waClient.GetClient().Download(ctx, imgMsg)
+				data, dlErr = o.waClient.GetClient().Download(ctx, imgMsg)
 				mime = imgMsg.GetMimetype()
 			}
 		} else {
 			docMsg := msg.RawMessage.GetDocumentMessage()
 			if docMsg != nil {
-				data, err = o.waClient.GetClient().Download(ctx, docMsg)
+				data, dlErr = o.waClient.GetClient().Download(ctx, docMsg)
 				mime = docMsg.GetMimetype()
 			}
 		}
-		if err != nil || data == nil {
-			return fmt.Errorf("failed to download media: %v", err)
+		if dlErr != nil || data == nil {
+			return fmt.Errorf("failed to download media: %v", dlErr)
 		}
 		o.logger.Info().
 			Str("msg_id", msg.ID).
@@ -134,6 +164,16 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 			Dur("duration_ms", time.Since(exStart)).
 			Msg("[orchestrator] extraction done")
 
+		// Debug log for extracted text (truncated to 1000 chars to avoid overwhelming the console)
+		previewText := text
+		if len(previewText) > 1000 {
+			previewText = previewText[:1000] + "... (truncated)"
+		}
+		o.logger.Info().
+			Str("msg_id", msg.ID).
+			Str("extracted_text_preview", previewText).
+			Msg("[orchestrator] extracted text content")
+
 		if msg.MessageType == whatsapp.MessageTypeImage {
 			userText = text
 			if msg.Caption != "" {
@@ -141,21 +181,21 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 			}
 		} else {
 			// Document: ingest into RAG, reply with confirmation only.
-			
+
 			// === EXTRACT METADATA VIA LLM ===
 			metaStart := time.Now()
 			metadata := map[string]string{"source_file": msg.ID}
-			
+
 			extractText := text
 			if len(extractText) > 2000 {
 				extractText = extractText[:2000]
 			}
-			
+
 			metaPrompt := "Extract the Title and Author from the following document text. If not found, output 'Unknown'. Format exactly as:\nTitle: [Title]\nAuthor: [Author]\n\nDocument text:\n" + extractText
 			metaMessages := []ollama.ChatMessage{
 				{Role: "user", Content: metaPrompt},
 			}
-			
+
 			metaReply, err := o.ollama.Chat(ctx, metaMessages)
 			if err == nil {
 				for _, line := range strings.Split(metaReply, "\n") {
@@ -170,7 +210,7 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 			} else {
 				o.logger.Warn().Err(err).Msg("[orchestrator] metadata extraction failed, using default")
 			}
-			
+
 			o.logger.Info().
 				Str("msg_id", msg.ID).
 				Dur("duration_ms", time.Since(metaStart)).
@@ -184,6 +224,26 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 				Int("text_len", len(text)).
 				Dur("duration_ms", time.Since(ingStart)).
 				Msg("[orchestrator] RAG ingestion done")
+
+			fileName := "unknown"
+			if docMsg := msg.RawMessage.GetDocumentMessage(); docMsg != nil && docMsg.GetFileName() != "" {
+				fileName = docMsg.GetFileName()
+			}
+			
+			docID := uuid.New().String()
+			errDoc := o.repo.InsertUserDocument(ctx, repository.InsertUserDocumentParams{
+				ID:            docID,
+				UserID:        userID,
+				PlatformMsgID: msg.ID,
+				FileName:      fileName,
+				Title:         metadata["Title"],
+				Author:        metadata["Author"],
+			})
+			if errDoc != nil {
+				o.logger.Warn().Err(errDoc).Msg("[orchestrator] failed to save document metadata to sqlite")
+			} else {
+				o.logger.Info().Str("doc_id", docID).Msg("[orchestrator] saved document metadata to sqlite")
+			}
 
 			sendStart := time.Now()
 			summary := fmt.Sprintf("✅ Dokumen berhasil diproses.\n📄 %d bagian disimpan ke memori.\n\nKamu bisa langsung bertanya tentang isi dokumen ini.", count)
@@ -204,28 +264,76 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 		Str("msg_id", msg.ID).
 		Int("user_text_len", len(userText)).
 		Dur("preprocess_ms", time.Since(handleStart)).
-		Msg("[orchestrator] preprocessing complete, starting RAG retrieval")
+		Msg("[orchestrator] preprocessing complete, starting retrieval + memory")
 
-	// ── 2. Retrieval ──────────────────────────────────────────────────
-	retStart := time.Now()
-	ctxInfo, err := o.ragRetrieve.Retrieve(ctx, userText)
-	if err != nil {
-		o.logger.Warn().Err(err).
+	sessionID := "default"
+
+	// ── 1.5 Reference Resolution ────────────────────────────────────
+	ragQuery := userText
+	targetDocID := ""
+	if msg.MessageType == whatsapp.MessageTypeText || msg.MessageType == whatsapp.MessageTypeVoiceNote {
+		ragQuery, targetDocID = o.refResolver.ResolveQuery(ctx, userID, userText, sessionID)
+		if targetDocID != "" {
+			// If target document is identified, we could eventually filter Qdrant by source_file=targetDocID
+			// But for now, we just use the rewritten query.
+			_ = targetDocID
+		}
+	}
+
+	// ── 2. Retrieval (RAG docs + fact memory in parallel) ──────────
+	type ragResult struct {
+		ctx rag.PromptContext
+		err error
+	}
+	type memResult struct {
+		context string
+		err     error
+	}
+
+	ragCh := make(chan ragResult, 1)
+	memCh := make(chan memResult, 1)
+
+	go func() {
+		retStart := time.Now()
+		ctxInfo, err := o.ragRetrieve.Retrieve(ctx, ragQuery)
+		o.logger.Info().
 			Str("msg_id", msg.ID).
-			Dur("duration_ms", time.Since(retStart)).
-			Msg("[orchestrator] RAG retrieval failed")
-		// non-fatal: continue without context
+			Bool("has_results", ctxInfo.HasResults).
+			Int("context_len", len(ctxInfo.Context)).
+			Dur("ms", time.Since(retStart)).
+			Msg("[orchestrator] RAG retrieval done")
+		ragCh <- ragResult{ctx: ctxInfo, err: err}
+	}()
+
+	go func() {
+		memStart := time.Now()
+		memCtx, err := o.memory.PrefetchRelevant(ctx, userID, userText)
+		o.logger.Info().
+			Str("msg_id", msg.ID).
+			Int("memory_len", len(memCtx)).
+			Dur("ms", time.Since(memStart)).
+			Msg("[orchestrator] memory prefetch done")
+		memCh <- memResult{context: memCtx, err: err}
+	}()
+
+	ragRes := <-ragCh
+	memRes := <-memCh
+
+	ctxInfo := ragRes.ctx
+	if ragRes.err != nil {
+		o.logger.Warn().Err(ragRes.err).Msg("[orchestrator] RAG retrieval failed")
 		ctxInfo = rag.PromptContext{HasResults: false}
 	}
-	o.logger.Info().
-		Str("msg_id", msg.ID).
-		Bool("has_results", ctxInfo.HasResults).
-		Int("context_len", len(ctxInfo.Context)).
-		Dur("duration_ms", time.Since(retStart)).
-		Msg("[orchestrator] RAG retrieval done")
+
+	memoryContext := ""
+	if memRes.err != nil {
+		o.logger.Warn().Err(memRes.err).Msg("[orchestrator] memory prefetch failed")
+	} else {
+		memoryContext = memRes.context
+	}
 
 	// ── 3. LLM Generation ─────────────────────────────────────────────
-	systemPrompt := buildSystemPrompt(ctxInfo)
+	systemPrompt := buildSystemPrompt(ctxInfo, memoryContext)
 
 	messages := []ollama.ChatMessage{
 		{Role: "system", Content: systemPrompt},
@@ -245,8 +353,6 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 		o.logger.Error().Err(err).
 			Str("msg_id", msg.ID).
 			Dur("duration_ms", llmDur).
-			Int("system_prompt_len", len(systemPrompt)).
-			Int("user_text_len", len(userText)).
 			Msg("[orchestrator] Ollama chat FAILED")
 		return err
 	}
@@ -265,33 +371,72 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 		Dur("total_ms", time.Since(handleStart)).
 		Msg("[orchestrator] handle complete")
 
+	// ── 5. Async: persist conversation + extract facts ────────────────
+	// Store messages in messages_v2
+	sessionID = "default" // TODO: session rotation based on idle time
+	o.repo.InsertMessageV2(ctx, repository.InsertMessageV2Params{
+		UserID:        userID,
+		Platform:      "whatsapp",
+		PlatformMsgID: msg.ID,
+		SessionID:     sessionID,
+		Role:          "user",
+		Content:       userText,
+		TokenCount:    estimateTokens(userText),
+	})
+	o.repo.InsertMessageV2(ctx, repository.InsertMessageV2Params{
+		UserID:    userID,
+		Platform:  "whatsapp",
+		SessionID: sessionID,
+		Role:      "assistant",
+		Content:   reply,
+		TokenCount: estimateTokens(reply),
+	})
+
+	// Fire async fact extraction
+	o.memory.SyncAsync(userID, userText, reply)
+
 	return err
 }
 
-// buildSystemPrompt constructs system prompt with bounded RAG context.
-func buildSystemPrompt(ctxInfo rag.PromptContext) string {
+// estimateTokens rough word-based token count.
+func estimateTokens(s string) int {
+	words := 0
+	for range strings.Fields(s) {
+		words++
+	}
+	return int(float64(words) * 1.3)
+}
+
+// buildSystemPrompt constructs system prompt with bounded RAG context + memory.
+func buildSystemPrompt(ctxInfo rag.PromptContext, memoryContext string) string {
 	base := "You are a helpful assistant. Answer concisely in the same language as the user's message. Keep answers under 150 words unless the user explicitly asks for detail."
-
-	if !ctxInfo.HasResults {
-		return base
-	}
-
-	ragCtx := ctxInfo.Context
-	if len(ragCtx) > maxContextChars {
-		ragCtx = ragCtx[:maxContextChars] + "\n[...context truncated...]"
-	}
 
 	var sb strings.Builder
 	sb.WriteString(base)
-	sb.WriteString("\n\nUse the following context from stored documents to help answer. ")
-	sb.WriteString("If the context is not relevant, ignore it.\n\n")
-	sb.WriteString("--- CONTEXT ---\n")
-	sb.WriteString(ragCtx)
-	sb.WriteString("\n--- END CONTEXT ---")
 
-	if len(ctxInfo.Sources) > 0 {
-		sb.WriteString("\n\nSources: ")
-		sb.WriteString(strings.Join(ctxInfo.Sources, ", "))
+	// Memory context (personal facts from previous conversations)
+	if memoryContext != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(memoryContext)
+	}
+
+	// RAG document context
+	if ctxInfo.HasResults {
+		ragCtx := ctxInfo.Context
+		if len(ragCtx) > maxContextChars {
+			ragCtx = ragCtx[:maxContextChars] + "\n[...context truncated...]"
+		}
+
+		sb.WriteString("\n\nUse the following context from stored documents to help answer. ")
+		sb.WriteString("If the context is not relevant, ignore it.\n\n")
+		sb.WriteString("--- CONTEXT ---\n")
+		sb.WriteString(ragCtx)
+		sb.WriteString("\n--- END CONTEXT ---")
+
+		if len(ctxInfo.Sources) > 0 {
+			sb.WriteString("\n\nSources: ")
+			sb.WriteString(strings.Join(ctxInfo.Sources, ", "))
+		}
 	}
 
 	return sb.String()

@@ -23,6 +23,7 @@ type chatRequest struct {
 	Model     string            `json:"model"`
 	Messages  []ChatMessage     `json:"messages"`
 	Stream    bool              `json:"stream"`
+	Format    string            `json:"format,omitempty"`
 	Options   map[string]any    `json:"options,omitempty"`
 	KeepAlive string            `json:"keep_alive,omitempty"`
 }
@@ -90,6 +91,15 @@ func (c *OllamaClient) Warmup(ctx context.Context) error {
 
 // Chat sends chat messages to Ollama.
 func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
+	return c.doChat(ctx, messages, "")
+}
+
+// ChatJSON sends chat messages to Ollama and guarantees JSON output.
+func (c *OllamaClient) ChatJSON(ctx context.Context, messages []ChatMessage) (string, error) {
+	return c.doChat(ctx, messages, "json")
+}
+
+func (c *OllamaClient) doChat(ctx context.Context, messages []ChatMessage, format string) (string, error) {
 	tokenEst := estimateTokens(messages)
 	c.logger.Info().
 		Int("token_estimate", tokenEst).
@@ -126,6 +136,7 @@ func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string
 		Model:    c.model,
 		Messages: messages,
 		Stream:   false,
+		Format:   format,
 		Options: map[string]any{
 			"num_predict": 200,  // reduced: shorter replies = faster
 			"temperature": 0.7,

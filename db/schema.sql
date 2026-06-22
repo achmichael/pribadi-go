@@ -1,17 +1,4 @@
-CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    wa_id TEXT NOT NULL UNIQUE,
-    from_jid TEXT NOT NULL,
-    to_jid TEXT NOT NULL,
-    content TEXT NOT NULL,
-    media_type TEXT,
-    timestamp INTEGER NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
 
-CREATE INDEX IF NOT EXISTS idx_messages_from_jid ON messages(from_jid);
-CREATE INDEX IF NOT EXISTS idx_messages_to_jid ON messages(to_jid);
-CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 
 CREATE TABLE IF NOT EXISTS reminders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
