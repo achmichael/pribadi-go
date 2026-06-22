@@ -38,8 +38,8 @@ func (s *ingestionService) IngestText(ctx context.Context, text string, metadata
 	sourceFile := metadata["source_file"]
 
 	opts := chunker.ChunkOptions{
-		MaxTokens: 400,
-		Overlap:   75,
+		MaxTokens: 500,
+		Overlap:   100,
 	}
 
 	chunks, err := chunker.ChunkText(text, sourceFile, opts)

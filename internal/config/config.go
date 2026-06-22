@@ -12,7 +12,7 @@ type Config struct {
 	AppPort          string `envconfig:"APP_PORT" required:"true"`
 	LogLevel         string `envconfig:"LOG_LEVEL" default:"info"`
 	SQLitePath       string `envconfig:"SQLITE_PATH" required:"true"`
-	VectorDBPath     string `envconfig:"VECTOR_DB_PATH" required:"true"`
+	QdrantAddr       string `envconfig:"QDRANT_ADDR" default:"localhost:6334"`
 	OllamaBaseURL    string `envconfig:"OLLAMA_BASE_URL" required:"true"`
 	OllamaModel      string `envconfig:"OLLAMA_MODEL" required:"true"`
 	WhisperModelPath string `envconfig:"WHISPER_MODEL_PATH" required:"true"`

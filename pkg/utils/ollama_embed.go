@@ -23,10 +23,6 @@ type ollamaEmbedResponse struct {
 	Embeddings [][]float32 `json:"embeddings"`
 }
 
-// Legacy types kept for backward compatibility with chromem-go callback.
-type OllamaEmbeddingRequest = ollamaEmbedRequest
-type OllamaEmbeddingResponse = ollamaEmbedResponse
-
 // OllamaEmbedder provides embedding functionality using Ollama.
 type OllamaEmbedder struct {
 	baseURL   string

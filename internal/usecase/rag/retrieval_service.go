@@ -42,7 +42,7 @@ func (s *retrievalService) Retrieve(ctx context.Context, question string) (Promp
 		Int("query_len", len(question)).
 		Msg("[retrieval] starting search")
 
-	results, err := s.vectorRepo.Search(ctx, question, 3)
+	results, err := s.vectorRepo.Search(ctx, question, 8)
 	searchDur := time.Since(start)
 
 	if err != nil {
@@ -63,7 +63,7 @@ func (s *retrievalService) Retrieve(ctx context.Context, question string) (Promp
 	var sources []string
 
 	// Only include results above relevance threshold.
-	const minScore float32 = 0.4
+	const minScore float32 = 0.3
 	for i, res := range results {
 		if res.Score < minScore {
 			continue

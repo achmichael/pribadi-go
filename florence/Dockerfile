@@ -27,19 +27,18 @@ COPY main.py .
 # Model cache directory — mount a host volume here to persist across restarts
 # so the model is not re-downloaded every container start
 ENV HF_HOME=/model_cache
-ENV TRANSFORMERS_CACHE=/model_cache
 
 # Expose FastAPI port
 EXPOSE 8000
 
 # Pre-download model weights at build time so first request is not slow.
 # Comment this out if you prefer lazy loading (saves build time / image size).
-RUN python - <<'EOF'
-from transformers import AutoProcessor, AutoModelForCausalLM
-model_id = "microsoft/Florence-2-large-ft"
-AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True)
-print("Florence-2 weights downloaded successfully.")
-EOF
+# RUN python - <<'EOF'
+# from transformers import AutoProcessor, AutoModelForCausalLM
+# model_id = "microsoft/Florence-2-large-ft"
+# AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+# AutoModelForCausalLM.from_pretrained(model_id, trust_remote_code=True)
+# print("Florence-2 weights downloaded successfully.")
+# EOF
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
