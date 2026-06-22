@@ -33,13 +33,15 @@ func NewOllamaEmbedder(baseURL, model string) *OllamaEmbedder {
 		baseURL: baseURL,
 		model:   model,
 		client: &http.Client{
-			Timeout: 5 * time.Minute,
+			Timeout: 2 * time.Minute,
 		},
 	}
 }
 
 // Embed generates embeddings for the given text using Ollama
-func (e *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (e *OllamaEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
+	start := time.Now()
+
 	reqBody := OllamaEmbeddingRequest{
 		Model:  e.model,
 		Prompt: text,
@@ -50,27 +52,31 @@ func (e *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float32, err
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", e.baseURL+"/api/embeddings", bytes.NewBuffer(jsonData))
+	// Use background context for the HTTP call since we manage timeout via client
+	req, err := http.NewRequest("POST", e.baseURL+"/api/embeddings", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := e.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
+		return nil, fmt.Errorf("embed request failed (text_len=%d, elapsed=%s): %w",
+			len(text), time.Since(start), err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ollama API returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("ollama embedding API returned status %d (text_len=%d, elapsed=%s)",
+			resp.StatusCode, len(text), time.Since(start))
 	}
 
 	var embeddingResp OllamaEmbeddingResponse
 	if err := json.NewDecoder(resp.Body).Decode(&embeddingResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
+
+	_ = time.Since(start) // available for caller logging
 
 	return embeddingResp.Embedding, nil
 }

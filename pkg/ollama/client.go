@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 // ChatMessage represents a message in the conversation
@@ -18,9 +20,10 @@ type ChatMessage struct {
 }
 
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []ChatMessage `json:"messages"`
-	Stream   bool          `json:"stream"`
+	Model    string            `json:"model"`
+	Messages []ChatMessage     `json:"messages"`
+	Stream   bool              `json:"stream"`
+	Options  map[string]any    `json:"options,omitempty"`
 }
 
 type chatResponse struct {
@@ -41,19 +44,20 @@ type OllamaClient struct {
 	baseURL    string
 	model      string
 	httpClient *http.Client
+	logger     *zerolog.Logger
 }
 
 // NewClient creates a new Ollama client
-func NewClient(baseURL, model string) *OllamaClient {
+func NewClient(baseURL, model string, logger *zerolog.Logger) *OllamaClient {
 	return &OllamaClient{
 		baseURL: baseURL,
 		model:   model,
 		httpClient: &http.Client{Timeout: 5 * time.Minute},
+		logger:  logger,
 	}
 }
 
 // MaxPromptTokens is the soft cap for total prompt tokens sent to Chat.
-// Prompts exceeding this are truncated to avoid timeouts on modest hardware.
 const MaxPromptTokens = 2048
 
 // estimateTokens rough count: words * 1.3
@@ -75,12 +79,14 @@ func truncateToWordLimit(s string, maxWords int) string {
 }
 
 // Chat sends chat messages to Ollama.
-// It enforces MaxPromptTokens by truncating the user message if needed.
 func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
 	tokenEst := estimateTokens(messages)
-	fmt.Printf("Prompt token estimate: %d\n", tokenEst)
+	c.logger.Info().
+		Int("token_estimate", tokenEst).
+		Str("model", c.model).
+		Msg("[ollama] chat request preparing")
 
-	// Guard: if prompt too large, truncate the longest message (usually user)
+	// Guard: if prompt too large, truncate the longest message
 	if tokenEst > MaxPromptTokens {
 		maxIdx := 0
 		maxLen := 0
@@ -91,44 +97,72 @@ func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string
 				maxIdx = i
 			}
 		}
-		// How many words to cut: keep total under MaxPromptTokens
 		excess := tokenEst - MaxPromptTokens
-		excessWords := int(float64(excess) / 1.3) + 10 // extra margin
+		excessWords := int(float64(excess)/1.3) + 10
 		targetWords := maxLen - excessWords
 		if targetWords < 50 {
 			targetWords = 50
 		}
 		messages[maxIdx].Content = truncateToWordLimit(messages[maxIdx].Content, targetWords)
-		fmt.Printf("Prompt truncated to ~%d tokens (was %d)\n", estimateTokens(messages), tokenEst)
+		newEst := estimateTokens(messages)
+		c.logger.Warn().
+			Int("original_tokens", tokenEst).
+			Int("truncated_tokens", newEst).
+			Int("truncated_role_idx", maxIdx).
+			Msg("[ollama] prompt truncated to fit MaxPromptTokens")
 	}
 
 	reqBody := chatRequest{
 		Model:    c.model,
 		Messages: messages,
 		Stream:   false,
+		Options: map[string]any{
+			"num_predict": 300, // cap output tokens to prevent verbose replies
+			"temperature": 0.7,
+		},
 	}
 
 	data, _ := json.Marshal(reqBody)
 
-	// Perform request with simple retry
 	var resp *http.Response
 	var err error
 	for i := 0; i < 3; i++ {
+		attemptStart := time.Now()
 		req, _ := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/chat", bytes.NewBuffer(data))
 		req.Header.Set("Content-Type", "application/json")
 
+		c.logger.Debug().
+			Int("attempt", i+1).
+			Int("payload_bytes", len(data)).
+			Msg("[ollama] chat HTTP request sending")
+
 		resp, err = c.httpClient.Do(req)
+
 		if err != nil {
-			// Retry on timeout/connection errors
+			c.logger.Warn().Err(err).
+				Int("attempt", i+1).
+				Dur("duration_ms", time.Since(attemptStart)).
+				Msg("[ollama] chat HTTP request failed")
 			if i < 2 {
-				time.Sleep(time.Duration(i+1) * 2 * time.Second)
+				backoff := time.Duration(i+1) * 2 * time.Second
+				c.logger.Info().Dur("backoff", backoff).Msg("[ollama] retrying after backoff")
+				time.Sleep(backoff)
 				continue
 			}
-			return "", fmt.Errorf("ollama chat failed after retries: %w", err)
+			return "", fmt.Errorf("ollama chat failed after 3 retries: %w", err)
 		}
+
+		c.logger.Debug().
+			Int("attempt", i+1).
+			Int("status", resp.StatusCode).
+			Dur("duration_ms", time.Since(attemptStart)).
+			Msg("[ollama] chat HTTP response received")
+
 		if resp.StatusCode == 503 && i < 2 {
 			resp.Body.Close()
-			time.Sleep(time.Duration(i+1) * 2 * time.Second)
+			backoff := time.Duration(i+1) * 2 * time.Second
+			c.logger.Warn().Dur("backoff", backoff).Msg("[ollama] 503 received, retrying")
+			time.Sleep(backoff)
 			continue
 		}
 		break
@@ -141,19 +175,31 @@ func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		c.logger.Error().
+			Int("status", resp.StatusCode).
+			Str("body", string(body)).
+			Msg("[ollama] chat non-OK response")
 		return "", fmt.Errorf("ollama chat error: status %d body: %s", resp.StatusCode, string(body))
 	}
 
+	decodeStart := time.Now()
 	var chatResp chatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return "", err
+		return "", fmt.Errorf("decode chat response: %w", err)
 	}
+	c.logger.Debug().
+		Dur("decode_ms", time.Since(decodeStart)).
+		Int("reply_len", len(chatResp.Message.Content)).
+		Msg("[ollama] chat response decoded")
 
 	return chatResp.Message.Content, nil
 }
 
-// GenerateEmbedding generates embeddings
+// GenerateEmbedding generates embeddings for given text.
 func (c *OllamaClient) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
+	start := time.Now()
+	textLen := len(text)
+
 	reqBody := embeddingRequest{Model: c.model, Prompt: text}
 	data, _ := json.Marshal(reqBody)
 
@@ -162,13 +208,33 @@ func (c *OllamaClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		c.logger.Error().Err(err).
+			Int("text_len", textLen).
+			Dur("duration_ms", time.Since(start)).
+			Msg("[ollama] embedding request failed")
+		return nil, fmt.Errorf("embedding request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		c.logger.Error().
+			Int("status", resp.StatusCode).
+			Str("body", string(body)).
+			Msg("[ollama] embedding non-OK response")
+		return nil, fmt.Errorf("ollama embedding error: status %d", resp.StatusCode)
+	}
+
 	var embResp embeddingResponse
 	if err := json.NewDecoder(resp.Body).Decode(&embResp); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode embedding response: %w", err)
 	}
+
+	c.logger.Debug().
+		Int("text_len", textLen).
+		Int("embedding_dim", len(embResp.Embedding)).
+		Dur("duration_ms", time.Since(start)).
+		Msg("[ollama] embedding done")
+
 	return embResp.Embedding, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/achmichael/pribadi-go/internal/delivery/whatsapp"
 	"github.com/achmichael/pribadi-go/internal/repository"
@@ -41,34 +42,59 @@ func NewOrchestrator(
 }
 
 // maxContextChars caps how much RAG context goes into the system prompt.
-// 5 chunks × ~400 tokens × 4 chars/token ≈ 8000. We use 6000 for safety.
 const maxContextChars = 6000
 
 func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage) error {
-	var userText string
-	var skipLLM bool // when true, send a fixed reply without calling Ollama
+	handleStart := time.Now()
+	o.logger.Info().
+		Str("msg_id", msg.ID).
+		Str("sender", msg.SenderJID).
+		Str("type", string(msg.MessageType)).
+		Msg("[orchestrator] handle start")
 
-	// 1. Preprocessing
+	var userText string
+
+	// ── 1. Preprocessing ──────────────────────────────────────────────
 	switch msg.MessageType {
 	case whatsapp.MessageTypeVoiceNote:
+		// 1a. Download audio
 		audioMsg := msg.RawMessage.GetAudioMessage()
 		if audioMsg == nil {
 			return fmt.Errorf("no audio message found")
 		}
+
+		dlStart := time.Now()
 		data, err := o.waClient.GetClient().Download(ctx, audioMsg)
 		if err != nil {
 			return err
 		}
+		o.logger.Info().
+			Str("msg_id", msg.ID).
+			Int("bytes", len(data)).
+			Dur("duration_ms", time.Since(dlStart)).
+			Msg("[orchestrator] media download done")
+
+		// 1b. Transcribe
+		txStart := time.Now()
 		text, err := o.transcription.Transcribe(ctx, data)
 		if err != nil {
 			return err
 		}
+		o.logger.Info().
+			Str("msg_id", msg.ID).
+			Int("text_len", len(text)).
+			Dur("duration_ms", time.Since(txStart)).
+			Msg("[orchestrator] transcription done")
+
 		userText = text
 
 	case whatsapp.MessageTypeImage, whatsapp.MessageTypeDocument:
+		// 1a. Download media
 		var data []byte
 		var err error
 		var mime string
+
+		dlStart := time.Now()
 		if msg.MessageType == whatsapp.MessageTypeImage {
 			imgMsg := msg.RawMessage.GetImageMessage()
 			if imgMsg != nil {
@@ -85,51 +111,85 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 		if err != nil || data == nil {
 			return fmt.Errorf("failed to download media: %v", err)
 		}
+		o.logger.Info().
+			Str("msg_id", msg.ID).
+			Str("mime", mime).
+			Int("bytes", len(data)).
+			Dur("duration_ms", time.Since(dlStart)).
+			Msg("[orchestrator] media download done")
 
-		// Use effective mime from message if IncomingMessage field is empty
 		if mime == "" {
 			mime = msg.MediaMimetype
 		}
 
+		// 1b. Extract text
+		exStart := time.Now()
 		text, err := o.extraction.ExtractText(ctx, data, mime)
 		if err != nil {
 			return err
 		}
+		o.logger.Info().
+			Str("msg_id", msg.ID).
+			Int("text_len", len(text)).
+			Dur("duration_ms", time.Since(exStart)).
+			Msg("[orchestrator] extraction done")
 
 		if msg.MessageType == whatsapp.MessageTypeImage {
-			// Image: Florence already produced rich description.
-			// Feed directly to Ollama for conversational response.
 			userText = text
 			if msg.Caption != "" {
 				userText = fmt.Sprintf("%s\n\nUser caption: %s", text, msg.Caption)
 			}
 		} else {
 			// Document: ingest into RAG, reply with confirmation only.
-			// DO NOT send full doc text to LLM — that causes timeouts.
+			ingStart := time.Now()
 			count, _ := o.ragIngest.IngestText(ctx, text, map[string]string{"source_file": msg.ID})
-
 			o.logger.Info().
+				Str("msg_id", msg.ID).
 				Int("chunks_stored", count).
 				Int("text_len", len(text)).
-				Str("msg_id", msg.ID).
-				Msg("Document ingested into RAG")
+				Dur("duration_ms", time.Since(ingStart)).
+				Msg("[orchestrator] RAG ingestion done")
 
-			// Send confirmation directly — no LLM call needed
+			sendStart := time.Now()
 			summary := fmt.Sprintf("✅ Dokumen berhasil diproses.\n📄 %d bagian disimpan ke memori.\n\nKamu bisa langsung bertanya tentang isi dokumen ini.", count)
-			return o.waClient.SendText(ctx, msg.SenderJID, summary)
+			err := o.waClient.SendText(ctx, msg.SenderJID, summary)
+			o.logger.Info().
+				Str("msg_id", msg.ID).
+				Dur("duration_ms", time.Since(sendStart)).
+				Dur("total_ms", time.Since(handleStart)).
+				Msg("[orchestrator] WA send done (document)")
+			return err
 		}
 
 	default:
 		userText = msg.TextContent
 	}
 
-	if skipLLM {
-		return nil
+	o.logger.Info().
+		Str("msg_id", msg.ID).
+		Int("user_text_len", len(userText)).
+		Dur("preprocess_ms", time.Since(handleStart)).
+		Msg("[orchestrator] preprocessing complete, starting RAG retrieval")
+
+	// ── 2. Retrieval ──────────────────────────────────────────────────
+	retStart := time.Now()
+	ctxInfo, err := o.ragRetrieve.Retrieve(ctx, userText)
+	if err != nil {
+		o.logger.Warn().Err(err).
+			Str("msg_id", msg.ID).
+			Dur("duration_ms", time.Since(retStart)).
+			Msg("[orchestrator] RAG retrieval failed")
+		// non-fatal: continue without context
+		ctxInfo = rag.PromptContext{HasResults: false}
 	}
+	o.logger.Info().
+		Str("msg_id", msg.ID).
+		Bool("has_results", ctxInfo.HasResults).
+		Int("context_len", len(ctxInfo.Context)).
+		Dur("duration_ms", time.Since(retStart)).
+		Msg("[orchestrator] RAG retrieval done")
 
-	// 2. Retrieval & Generation
-	ctxInfo, _ := o.ragRetrieve.Retrieve(ctx, userText)
-
+	// ── 3. LLM Generation ─────────────────────────────────────────────
 	systemPrompt := buildSystemPrompt(ctxInfo)
 
 	messages := []ollama.ChatMessage{
@@ -137,29 +197,51 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 		{Role: "user", Content: userText},
 	}
 
+	o.logger.Info().
+		Str("msg_id", msg.ID).
+		Int("system_prompt_len", len(systemPrompt)).
+		Int("user_text_len", len(userText)).
+		Msg("[orchestrator] sending to Ollama")
+
+	llmStart := time.Now()
 	reply, err := o.ollama.Chat(ctx, messages)
+	llmDur := time.Since(llmStart)
 	if err != nil {
 		o.logger.Error().Err(err).
-			Int("user_text_len", len(userText)).
+			Str("msg_id", msg.ID).
+			Dur("duration_ms", llmDur).
 			Int("system_prompt_len", len(systemPrompt)).
-			Msg("Ollama chat failed")
+			Int("user_text_len", len(userText)).
+			Msg("[orchestrator] Ollama chat FAILED")
 		return err
 	}
+	o.logger.Info().
+		Str("msg_id", msg.ID).
+		Int("reply_len", len(reply)).
+		Dur("duration_ms", llmDur).
+		Msg("[orchestrator] Ollama chat done")
 
-	// 3. Response
-	return o.waClient.SendText(ctx, msg.SenderJID, reply)
+	// ── 4. Send reply ─────────────────────────────────────────────────
+	sendStart := time.Now()
+	err = o.waClient.SendText(ctx, msg.SenderJID, reply)
+	o.logger.Info().
+		Str("msg_id", msg.ID).
+		Dur("send_ms", time.Since(sendStart)).
+		Dur("total_ms", time.Since(handleStart)).
+		Msg("[orchestrator] handle complete")
+
+	return err
 }
 
 // buildSystemPrompt constructs system prompt with bounded RAG context.
 func buildSystemPrompt(ctxInfo rag.PromptContext) string {
-	base := "You are a helpful assistant. Answer in the same language as the user's message."
+	base := "You are a helpful assistant. Answer concisely in the same language as the user's message. Keep answers under 150 words unless the user explicitly asks for detail."
 
 	if !ctxInfo.HasResults {
 		return base
 	}
 
 	ragCtx := ctxInfo.Context
-	// Truncate RAG context if too long to prevent prompt blowup
 	if len(ragCtx) > maxContextChars {
 		ragCtx = ragCtx[:maxContextChars] + "\n[...context truncated...]"
 	}

@@ -3,8 +3,10 @@ package rag
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/achmichael/pribadi-go/internal/repository"
+	"github.com/rs/zerolog"
 )
 
 // PromptContext contains retrieval results for LLM prompt
@@ -21,23 +23,39 @@ type RetrievalService interface {
 
 type retrievalService struct {
 	vectorRepo repository.VectorRepository
+	logger     *zerolog.Logger
 }
 
 // NewRetrievalService creates a new retrieval service
-func NewRetrievalService(vectorRepo repository.VectorRepository) RetrievalService {
+func NewRetrievalService(vectorRepo repository.VectorRepository, logger *zerolog.Logger) RetrievalService {
 	return &retrievalService{
 		vectorRepo: vectorRepo,
+		logger:     logger,
 	}
 }
 
 // Retrieve searches top relevant chunks
 func (s *retrievalService) Retrieve(ctx context.Context, question string) (PromptContext, error) {
+	start := time.Now()
+
+	s.logger.Info().
+		Int("query_len", len(question)).
+		Msg("[retrieval] starting search")
+
 	results, err := s.vectorRepo.Search(ctx, question, 5)
+	searchDur := time.Since(start)
+
 	if err != nil {
+		s.logger.Error().Err(err).
+			Dur("duration_ms", searchDur).
+			Msg("[retrieval] search failed")
 		return PromptContext{}, err
 	}
 
 	if len(results) == 0 {
+		s.logger.Info().
+			Dur("duration_ms", searchDur).
+			Msg("[retrieval] no results found")
 		return PromptContext{HasResults: false}, nil
 	}
 
@@ -56,8 +74,17 @@ func (s *retrievalService) Retrieve(ctx context.Context, question string) (Promp
 		}
 	}
 
+	contextText := sb.String()
+
+	s.logger.Info().
+		Int("results_count", len(results)).
+		Int("context_len", len(contextText)).
+		Float32("top_score", results[0].Score).
+		Dur("duration_ms", searchDur).
+		Msg("[retrieval] search done")
+
 	return PromptContext{
-		Context:    sb.String(),
+		Context:    contextText,
 		Sources:    sources,
 		HasResults: true,
 	}, nil
