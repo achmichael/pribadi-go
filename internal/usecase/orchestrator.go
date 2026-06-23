@@ -191,7 +191,21 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 				extractText = extractText[:2000]
 			}
 
-			metaPrompt := "Extract the Title and Author from the following document text. If not found, output 'Unknown'. Format exactly as:\nTitle: [Title]\nAuthor: [Author]\n\nDocument text:\n" + extractText
+			metaPrompt := `You are the DOCUMENT TITLE EXTRACTION AND IDENTIFICATION AGENT.
+You are responsible for identifying the true document title and author.
+A document may contain file names, document types (e.g., LAPORAN, SKRIPSI), institution names, or report labels. These are NOT the document title.
+The actual title is the primary intellectual work being presented.
+
+PRIORITY ORDER for Title:
+1. Title extracted from cover page.
+2. Largest semantic title on first page.
+
+Format exactly as:
+Title: [Actual Title or Unknown]
+Author: [Author or Unknown]
+
+Document text:
+` + extractText
 			metaMessages := []ollama.ChatMessage{
 				{Role: "user", Content: metaPrompt},
 			}
@@ -409,7 +423,13 @@ func estimateTokens(s string) int {
 
 // buildSystemPrompt constructs system prompt with bounded RAG context + memory.
 func buildSystemPrompt(ctxInfo rag.PromptContext, memoryContext string) string {
-	base := "You are a helpful assistant. Answer concisely in the same language as the user's message. Keep answers under 150 words unless the user explicitly asks for detail."
+	base := `You are a helpful assistant. Answer concisely in the same language as the user's message. Keep answers under 150 words unless the user explicitly asks for detail.
+
+When a user asks for a document's title (e.g., "What is the title?"):
+- Return ONLY the actual document title.
+- Do NOT prepend phrases like "File name", "Document type", "Institution name", or "Report type".
+- Example of CORRECT response: "Analisis Pola Pembelian Konsumen Menggunakan Market Basket Analysis"
+- Example of INCORRECT response: "File laporan_project_akhir.pdf memiliki judul..."`
 
 	var sb strings.Builder
 	sb.WriteString(base)
