@@ -260,7 +260,7 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 					metadata["DocumentType"] = parsedMeta.DocumentType
 					metadata["Institution"] = parsedMeta.Institution
 					metadata["PublicationYear"] = parsedMeta.PublicationYear
-					
+
 					metaBytes, _ := json.Marshal(parsedMeta)
 					metaJSON = string(metaBytes)
 				} else {
@@ -358,7 +358,7 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 					bBytes, _ := json.Marshal(basicMeta)
 					metadataJSON = string(bBytes)
 				}
-				
+
 				var b strings.Builder
 				b.WriteString(fmt.Sprintf("--- DOCUMENT METADATA (AKTIF: document_id=%s) ---\n", doc.ID))
 				b.WriteString(metadataJSON)
