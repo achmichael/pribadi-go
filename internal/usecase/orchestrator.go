@@ -376,6 +376,37 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 				}
 				b.WriteString("--- END METADATA ---\n")
 				metadataBlock = b.String()
+
+				// --- Query Contextualization Agent ---
+				if doc.MetadataJSON != "" && doc.MetadataJSON != "{}" {
+					contextualizePrompt := fmt.Sprintf(`ANDA ADALAH: QUERY CONTEXTUALIZATION AGENT untuk sistem RAG multilingual.
+
+KONTEKS:
+Sistem ini menyimpan dokumen yang isinya bisa berbahasa apa saja (Inggris, Indonesia, dll), namun pengguna bisa bertanya dalam bahasa apa saja juga. Embedding model yang dipakai (nomic-embed-text) memiliki kemampuan cross-lingual retrieval yang lemah — artinya query Bahasa Indonesia kemungkinan tidak akan menemukan chunk relevan yang ditulis dalam Bahasa Inggris, dan sebaliknya.
+
+TUGAS ANDA:
+Anda menerima query asli dari pengguna beserta metadata dokumen aktif (jika ada, dari SQLite). Tugas Anda BUKAN menjawab pertanyaan, tetapi menghasilkan SATU query pencarian semantik yang dioptimalkan untuk retrieval, dengan ATURAN:
+
+1. Deteksi bahasa asli query pengguna.
+2. Jika tersedia metadata dokumen aktif (title, keywords, abstract) dan bahasa metadata tersebut BERBEDA dari bahasa query pengguna, gabungkan inti pertanyaan pengguna dengan istilah-istilah kunci (entity/topik) dari metadata tersebut ke dalam query akhir — agar query memiliki representasi leksikal di KEDUA bahasa.
+3. JANGAN menerjemahkan seluruh kalimat pengguna secara kaku. Cukup perkaya query dengan istilah kunci yang relevan dari metadata dokumen, dalam bahasa aslinya.
+4. Jika tidak ada metadata dokumen aktif yang relevan, kembalikan query asli tanpa perubahan.
+5. Output HANYA berupa query hasil akhir dalam bentuk teks polos, tanpa penjelasan, tanpa markdown.
+
+INPUT:
+Query pengguna: "%s"
+Metadata dokumen aktif (JSON): %s`, userText, doc.MetadataJSON)
+
+					ctxMsgs := []ollama.ChatMessage{{Role: "user", Content: contextualizePrompt}}
+					enrichedQuery, errCtx := o.ollama.Chat(ctx, ctxMsgs)
+					if errCtx == nil {
+						ragQuery = strings.TrimSpace(enrichedQuery)
+						o.logger.Info().Str("original_query", userText).Str("enriched_query", ragQuery).Msg("[orchestrator] query contextualization successful")
+					} else {
+						o.logger.Warn().Err(errCtx).Msg("[orchestrator] query contextualization failed, falling back to original query")
+					}
+				}
+				// ------------------------------------
 			}
 		}
 	}
