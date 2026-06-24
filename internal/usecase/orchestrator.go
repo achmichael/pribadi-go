@@ -37,16 +37,16 @@ type orchestrator struct {
 
 // DocMeta represents structured metadata extracted from documents
 type DocMeta struct {
-	DocumentType    string   `json:"document_type"`
-	Title           string   `json:"title"`
-	Authors         []string `json:"authors"`
-	Institution     string   `json:"institution"`
-	PublicationYear string   `json:"publication_year"`
-	DOI             string   `json:"doi"`
-	Keywords        []string `json:"keywords"`
-	Abstract        string   `json:"abstract"`
-	Supervisor      string   `json:"supervisor"`
-	Advisor         string   `json:"advisor"`
+	DocumentType    string `json:"document_type"`
+	Title           string `json:"title"`
+	Authors         string `json:"authors"`
+	Institution     string `json:"institution"`
+	PublicationYear string `json:"publication_year"`
+	DOI             string `json:"doi"`
+	Keywords        string `json:"keywords"`
+	Abstract        string `json:"abstract"`
+	Supervisor      string `json:"supervisor"`
+	Advisor         string `json:"advisor"`
 }
 
 func NewOrchestrator(
@@ -206,30 +206,35 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 				extractText = extractText[:2000]
 			}
 
-			metaPrompt := `You are a document metadata extraction system.
-Your task is to extract structured metadata from the first pages of a document.
-The document may be a journal article, conference paper, thesis, dissertation, final project report, technical report, book, or research paper.
+			metaPrompt := `ANDA ADALAH: DOCUMENT METADATA EXTRACTION AGENT
 
-## IMPORTANT
-Do not identify metadata based on file names. Do not use assumptions. Only use information explicitly present in the document.
+TUGAS ANDA:
+Ekstrak metadata terstruktur dari potongan teks dokumen di bawah ini. Teks ini adalah hasil OCR/ekstraksi otomatis dari PDF dan SERING MENGANDUNG NOISE seperti: header jurnal, nomor volume/issue, kode artikel, running title dari artikel lain dalam volume yang sama, nomor halaman, watermark, atau metadata penerbit yang TIDAK BOLEH disalahartikan sebagai judul dokumen.
 
-## OUTPUT FORMAT
-Return ONLY valid JSON.
+ATURAN WAJIB UNTUK MENENTUKAN "TITLE" (JUDUL):
+1. Judul dokumen yang benar SELALU berada tepat SEBELUM daftar nama penulis (authors), bukan sebelum nama jurnal/header/volume.
+2. JANGAN PERNAH mengambil teks yang terlihat seperti: nama jurnal, "Volume X Nomor Y", "JN-xxx"/kode artikel, ISSN, nama institusi penerbit, atau judul artikel lain yang mungkin muncul sebagai running header di bagian atas/bawah halaman.
+3. Judul asli biasanya merupakan frasa nominal yang menjelaskan topik penelitian (metode, subjek, objek penelitian) — bukan kalimat administratif jurnal.
+4. WAJIB lakukan cross-check internal sebelum finalisasi: setelah Anda mengekstrak "Title" dan "Abstract"/"Keywords", PERIKSA apakah keduanya secara tematik konsisten satu sama lain. Jika "Title" yang Anda temukan TIDAK relevan secara tema dengan "Abstract" atau "Keywords" yang Anda temukan di teks yang sama, maka "Title" tersebut SALAH — cari ulang kandidat judul lain di teks, atau jika benar-benar tidak ditemukan, kembalikan string kosong daripada memaksakan judul yang tidak konsisten.
+5. Jika dalam satu potongan teks Anda menemukan LEBIH DARI SATU kandidat judul (misalnya satu di bagian atas sebagai header, satu lagi tepat sebelum nama penulis), PILIH yang posisinya TEPAT SEBELUM/BERDEKATAN dengan daftar nama penulis.
+
+FORMAT OUTPUT:
+Jawab HANYA dalam format JSON murni, tanpa markdown, tanpa basa-basi, tanpa penjelasan tambahan. Jika sebuah field tidak ditemukan dalam teks, isi dengan string kosong "" — JANGAN mengisi dengan tebakan atau placeholder.
+
 {
   "document_type": "",
   "title": "",
-  "authors": [],
+  "authors": "",
   "institution": "",
   "publication_year": "",
   "doi": "",
-  "keywords": [],
+  "keywords": "",
   "abstract": "",
   "supervisor": "",
   "advisor": ""
 }
-Never return markdown. Never return explanations. Only JSON.
 
-## DOCUMENT TEXT
+TEKS DOKUMEN UNTUK DIANALISIS:
 ` + extractText
 			metaMessages := []ollama.ChatMessage{
 				{Role: "user", Content: metaPrompt},
@@ -251,7 +256,7 @@ Never return markdown. Never return explanations. Only JSON.
 
 				if err := json.Unmarshal([]byte(cleanReply), &parsedMeta); err == nil {
 					metadata["Title"] = parsedMeta.Title
-					metadata["Author"] = strings.Join(parsedMeta.Authors, ", ")
+					metadata["Author"] = parsedMeta.Authors
 					metadata["DocumentType"] = parsedMeta.DocumentType
 					metadata["Institution"] = parsedMeta.Institution
 					metadata["PublicationYear"] = parsedMeta.PublicationYear
@@ -354,12 +359,12 @@ Never return markdown. Never return explanations. Only JSON.
 					if err := json.Unmarshal([]byte(doc.MetadataJSON), &parsedMeta); err == nil {
 						hasRichMeta = true
 						if parsedMeta.Title != "" { b.WriteString(fmt.Sprintf("Title: %s\n", parsedMeta.Title)) }
-						if len(parsedMeta.Authors) > 0 { b.WriteString(fmt.Sprintf("Authors: %s\n", strings.Join(parsedMeta.Authors, ", "))) }
+						if parsedMeta.Authors != "" { b.WriteString(fmt.Sprintf("Authors: %s\n", parsedMeta.Authors)) }
 						if parsedMeta.DocumentType != "" { b.WriteString(fmt.Sprintf("Document Type: %s\n", parsedMeta.DocumentType)) }
 						if parsedMeta.Institution != "" { b.WriteString(fmt.Sprintf("Institution: %s\n", parsedMeta.Institution)) }
 						if parsedMeta.PublicationYear != "" { b.WriteString(fmt.Sprintf("Publication Year: %s\n", parsedMeta.PublicationYear)) }
 						if parsedMeta.DOI != "" { b.WriteString(fmt.Sprintf("DOI: %s\n", parsedMeta.DOI)) }
-						if len(parsedMeta.Keywords) > 0 { b.WriteString(fmt.Sprintf("Keywords: %s\n", strings.Join(parsedMeta.Keywords, ", "))) }
+						if parsedMeta.Keywords != "" { b.WriteString(fmt.Sprintf("Keywords: %s\n", parsedMeta.Keywords)) }
 						if parsedMeta.Supervisor != "" { b.WriteString(fmt.Sprintf("Supervisor: %s\n", parsedMeta.Supervisor)) }
 						if parsedMeta.Advisor != "" { b.WriteString(fmt.Sprintf("Advisor: %s\n", parsedMeta.Advisor)) }
 					}
