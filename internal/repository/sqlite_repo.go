@@ -262,6 +262,10 @@ func runMigrations(db *sql.DB, migrationsDir string) error {
 			return fmt.Errorf("read migration %s: %w", f, err)
 		}
 		if _, err := db.Exec(string(data)); err != nil {
+			// Ignore "duplicate column name" so ALTER TABLE ADD COLUMN is idempotent
+			if strings.Contains(err.Error(), "duplicate column name") {
+				continue
+			}
 			return fmt.Errorf("execute migration %s: %w", f, err)
 		}
 	}

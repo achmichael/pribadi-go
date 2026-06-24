@@ -138,7 +138,7 @@ func (c *OllamaClient) doChat(ctx context.Context, messages []ChatMessage, forma
 		Stream:   false,
 		Format:   format,
 		Options: map[string]any{
-			"num_predict": 200,  // reduced: shorter replies = faster
+			"num_predict": 800,  // increased to allow full JSON abstract extraction
 			"temperature": 0.7,
 			"num_ctx":     2048, // limit context window for speed
 		},
