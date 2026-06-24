@@ -139,6 +139,7 @@ type UserDocument struct {
 	FileName      string
 	Title         string
 	Author        string
+	MetadataJSON  string
 	CreatedAt     time.Time
 }
 
@@ -149,6 +150,7 @@ type InsertUserDocumentParams struct {
 	FileName      string
 	Title         string
 	Author        string
+	MetadataJSON  string
 }
 
 // ─── Implementation ────────────────────────────────────────────────
@@ -578,16 +580,16 @@ func (r *sqliteRepo) UpdateFactTimestamp(ctx context.Context, factID int64) erro
 
 func (r *sqliteRepo) InsertUserDocument(ctx context.Context, arg InsertUserDocumentParams) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO user_documents (id, user_id, platform_msg_id, file_name, title, author)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		arg.ID, arg.UserID, arg.PlatformMsgID, arg.FileName, arg.Title, arg.Author,
+		`INSERT INTO user_documents (id, user_id, platform_msg_id, file_name, title, author, metadata_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		arg.ID, arg.UserID, arg.PlatformMsgID, arg.FileName, arg.Title, arg.Author, arg.MetadataJSON,
 	)
 	return err
 }
 
 func (r *sqliteRepo) GetLatestUserDocuments(ctx context.Context, userID string, limit int) ([]UserDocument, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, user_id, platform_msg_id, file_name, title, author, created_at
+		`SELECT id, user_id, platform_msg_id, file_name, title, author, metadata_json, created_at
 		 FROM user_documents
 		 WHERE user_id = ?
 		 ORDER BY created_at DESC
@@ -604,7 +606,7 @@ func (r *sqliteRepo) GetLatestUserDocuments(ctx context.Context, userID string, 
 		var d UserDocument
 		if err := rows.Scan(
 			&d.ID, &d.UserID, &d.PlatformMsgID,
-			&d.FileName, &d.Title, &d.Author, &d.CreatedAt,
+			&d.FileName, &d.Title, &d.Author, &d.MetadataJSON, &d.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -615,7 +617,7 @@ func (r *sqliteRepo) GetLatestUserDocuments(ctx context.Context, userID string, 
 
 func (r *sqliteRepo) GetUserDocumentByID(ctx context.Context, id string) (*UserDocument, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, user_id, platform_msg_id, file_name, title, author, created_at
+		`SELECT id, user_id, platform_msg_id, file_name, title, author, metadata_json, created_at
 		 FROM user_documents
 		 WHERE id = ?`,
 		id,
@@ -624,7 +626,7 @@ func (r *sqliteRepo) GetUserDocumentByID(ctx context.Context, id string) (*UserD
 	var d UserDocument
 	if err := row.Scan(
 		&d.ID, &d.UserID, &d.PlatformMsgID,
-		&d.FileName, &d.Title, &d.Author, &d.CreatedAt,
+		&d.FileName, &d.Title, &d.Author, &d.MetadataJSON, &d.CreatedAt,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil

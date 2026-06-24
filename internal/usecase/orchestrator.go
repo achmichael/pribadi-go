@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -32,6 +33,20 @@ type orchestrator struct {
 	resolver      *identity.Resolver
 	refResolver   ReferenceResolver
 	logger        *zerolog.Logger
+}
+
+// DocMeta represents structured metadata extracted from documents
+type DocMeta struct {
+	DocumentType    string   `json:"document_type"`
+	Title           string   `json:"title"`
+	Authors         []string `json:"authors"`
+	Institution     string   `json:"institution"`
+	PublicationYear string   `json:"publication_year"`
+	DOI             string   `json:"doi"`
+	Keywords        []string `json:"keywords"`
+	Abstract        string   `json:"abstract"`
+	Supervisor      string   `json:"supervisor"`
+	Advisor         string   `json:"advisor"`
 }
 
 func NewOrchestrator(
@@ -191,38 +206,73 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 				extractText = extractText[:2000]
 			}
 
-			metaPrompt := `You are the DOCUMENT TITLE EXTRACTION AND IDENTIFICATION AGENT.
-	You are responsible for identifying the true document title and author.
-	A document may contain file names, document types (e.g., LAPORAN, SKRIPSI), institution names, or report labels. These are NOT the document title.
-	The actual title is the primary intellectual work being presented.
-			
-	PRIORITY ORDER for Title:
-	1. Title extracted from cover page.
-	2. Largest semantic title on first page.
-			
-	Format exactly as:
-	Title: [Actual Title or Unknown]
-	Author: [Author or Unknown]
-			
-	Document text:
+			metaPrompt := `You are a document metadata extraction system.
+Your task is to extract structured metadata from the first pages of a document.
+The document may be a journal article, conference paper, thesis, dissertation, final project report, technical report, book, or research paper.
+
+## IMPORTANT
+Do not identify metadata based on file names. Do not use assumptions. Only use information explicitly present in the document.
+
+## OUTPUT FORMAT
+Return ONLY valid JSON.
+{
+  "document_type": "",
+  "title": "",
+  "authors": [],
+  "institution": "",
+  "publication_year": "",
+  "doi": "",
+  "keywords": [],
+  "abstract": "",
+  "supervisor": "",
+  "advisor": ""
+}
+Never return markdown. Never return explanations. Only JSON.
+
+## DOCUMENT TEXT
 ` + extractText
 			metaMessages := []ollama.ChatMessage{
 				{Role: "user", Content: metaPrompt},
 			}
 
-			metaReply, err := o.ollama.Chat(ctx, metaMessages)
+			var parsedMeta DocMeta
+			var metaJSON string
+			metaReply, err := o.ollama.ChatJSON(ctx, metaMessages)
 			if err == nil {
-				for _, line := range strings.Split(metaReply, "\n") {
-					line = strings.TrimSpace(line)
-					lowerLine := strings.ToLower(line)
-					if strings.HasPrefix(lowerLine, "title:") {
-						metadata["Title"] = strings.TrimSpace(line[6:])
-					} else if strings.HasPrefix(lowerLine, "author:") {
-						metadata["Author"] = strings.TrimSpace(line[7:])
-					}
+				cleanReply := strings.TrimSpace(metaReply)
+				if strings.HasPrefix(cleanReply, "```json") {
+					cleanReply = strings.TrimPrefix(cleanReply, "```json")
+					cleanReply = strings.TrimSuffix(cleanReply, "```")
+				} else if strings.HasPrefix(cleanReply, "```") {
+					cleanReply = strings.TrimPrefix(cleanReply, "```")
+					cleanReply = strings.TrimSuffix(cleanReply, "```")
+				}
+				cleanReply = strings.TrimSpace(cleanReply)
+
+				if err := json.Unmarshal([]byte(cleanReply), &parsedMeta); err == nil {
+					metadata["Title"] = parsedMeta.Title
+					metadata["Author"] = strings.Join(parsedMeta.Authors, ", ")
+					metadata["DocumentType"] = parsedMeta.DocumentType
+					metadata["Institution"] = parsedMeta.Institution
+					metadata["PublicationYear"] = parsedMeta.PublicationYear
+					
+					metaBytes, _ := json.Marshal(parsedMeta)
+					metaJSON = string(metaBytes)
+				} else {
+					o.logger.Warn().Err(err).Str("reply", cleanReply).Msg("[orchestrator] failed to parse JSON metadata")
 				}
 			} else {
-				o.logger.Warn().Err(err).Msg("[orchestrator] metadata extraction failed, using default")
+				o.logger.Warn().Err(err).Msg("[orchestrator] metadata extraction failed")
+			}
+
+			if metadata["Title"] == "" {
+				metadata["Title"] = "Unknown"
+			}
+			if metadata["Author"] == "" {
+				metadata["Author"] = "Unknown"
+			}
+			if metaJSON == "" {
+				metaJSON = "{}"
 			}
 
 			o.logger.Info().
@@ -254,6 +304,7 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 				FileName:      fileName,
 				Title:         metadata["Title"],
 				Author:        metadata["Author"],
+				MetadataJSON:  metaJSON,
 			})
 			if errDoc != nil {
 				o.logger.Warn().Err(errDoc).Msg("[orchestrator] failed to save document metadata to sqlite")
@@ -293,7 +344,33 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 		if targetDocID != "" {
 			doc, err := o.repo.GetUserDocumentByID(ctx, targetDocID)
 			if err == nil && doc != nil {
-				metadataBlock = fmt.Sprintf("--- DOCUMENT METADATA ---\nTitle: %s\nAuthor: %s\nFile Name: %s\n--- END METADATA ---\n", doc.Title, doc.Author, doc.FileName)
+				var b strings.Builder
+				b.WriteString("--- DOCUMENT METADATA ---\n")
+				b.WriteString(fmt.Sprintf("File Name: %s\n", doc.FileName))
+				
+				var parsedMeta DocMeta
+				hasRichMeta := false
+				if doc.MetadataJSON != "" && doc.MetadataJSON != "{}" {
+					if err := json.Unmarshal([]byte(doc.MetadataJSON), &parsedMeta); err == nil {
+						hasRichMeta = true
+						if parsedMeta.Title != "" { b.WriteString(fmt.Sprintf("Title: %s\n", parsedMeta.Title)) }
+						if len(parsedMeta.Authors) > 0 { b.WriteString(fmt.Sprintf("Authors: %s\n", strings.Join(parsedMeta.Authors, ", "))) }
+						if parsedMeta.DocumentType != "" { b.WriteString(fmt.Sprintf("Document Type: %s\n", parsedMeta.DocumentType)) }
+						if parsedMeta.Institution != "" { b.WriteString(fmt.Sprintf("Institution: %s\n", parsedMeta.Institution)) }
+						if parsedMeta.PublicationYear != "" { b.WriteString(fmt.Sprintf("Publication Year: %s\n", parsedMeta.PublicationYear)) }
+						if parsedMeta.DOI != "" { b.WriteString(fmt.Sprintf("DOI: %s\n", parsedMeta.DOI)) }
+						if len(parsedMeta.Keywords) > 0 { b.WriteString(fmt.Sprintf("Keywords: %s\n", strings.Join(parsedMeta.Keywords, ", "))) }
+						if parsedMeta.Supervisor != "" { b.WriteString(fmt.Sprintf("Supervisor: %s\n", parsedMeta.Supervisor)) }
+						if parsedMeta.Advisor != "" { b.WriteString(fmt.Sprintf("Advisor: %s\n", parsedMeta.Advisor)) }
+					}
+				}
+				
+				if !hasRichMeta {
+					b.WriteString(fmt.Sprintf("Title: %s\n", doc.Title))
+					b.WriteString(fmt.Sprintf("Author: %s\n", doc.Author))
+				}
+				b.WriteString("--- END METADATA ---\n")
+				metadataBlock = b.String()
 			}
 		}
 	}
