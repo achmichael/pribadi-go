@@ -349,32 +349,20 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 		if targetDocID != "" {
 			doc, err := o.repo.GetUserDocumentByID(ctx, targetDocID)
 			if err == nil && doc != nil {
-				var b strings.Builder
-				b.WriteString("--- DOCUMENT METADATA ---\n")
-				b.WriteString(fmt.Sprintf("File Name: %s\n", doc.FileName))
-				
-				var parsedMeta DocMeta
-				hasRichMeta := false
-				if doc.MetadataJSON != "" && doc.MetadataJSON != "{}" {
-					if err := json.Unmarshal([]byte(doc.MetadataJSON), &parsedMeta); err == nil {
-						hasRichMeta = true
-						if parsedMeta.Title != "" { b.WriteString(fmt.Sprintf("Title: %s\n", parsedMeta.Title)) }
-						if parsedMeta.Authors != "" { b.WriteString(fmt.Sprintf("Authors: %s\n", parsedMeta.Authors)) }
-						if parsedMeta.DocumentType != "" { b.WriteString(fmt.Sprintf("Document Type: %s\n", parsedMeta.DocumentType)) }
-						if parsedMeta.Institution != "" { b.WriteString(fmt.Sprintf("Institution: %s\n", parsedMeta.Institution)) }
-						if parsedMeta.PublicationYear != "" { b.WriteString(fmt.Sprintf("Publication Year: %s\n", parsedMeta.PublicationYear)) }
-						if parsedMeta.DOI != "" { b.WriteString(fmt.Sprintf("DOI: %s\n", parsedMeta.DOI)) }
-						if parsedMeta.Keywords != "" { b.WriteString(fmt.Sprintf("Keywords: %s\n", parsedMeta.Keywords)) }
-						if parsedMeta.Supervisor != "" { b.WriteString(fmt.Sprintf("Supervisor: %s\n", parsedMeta.Supervisor)) }
-						if parsedMeta.Advisor != "" { b.WriteString(fmt.Sprintf("Advisor: %s\n", parsedMeta.Advisor)) }
+				metadataJSON := doc.MetadataJSON
+				if metadataJSON == "" || metadataJSON == "{}" {
+					basicMeta := map[string]string{
+						"title":  doc.Title,
+						"author": doc.Author,
 					}
+					bBytes, _ := json.Marshal(basicMeta)
+					metadataJSON = string(bBytes)
 				}
 				
-				if !hasRichMeta {
-					b.WriteString(fmt.Sprintf("Title: %s\n", doc.Title))
-					b.WriteString(fmt.Sprintf("Author: %s\n", doc.Author))
-				}
-				b.WriteString("--- END METADATA ---\n")
+				var b strings.Builder
+				b.WriteString(fmt.Sprintf("--- DOCUMENT METADATA (AKTIF: document_id=%s) ---\n", doc.ID))
+				b.WriteString(metadataJSON)
+				b.WriteString("\n--- END METADATA ---\n")
 				metadataBlock = b.String()
 
 				// --- Query Contextualization Agent ---
@@ -464,11 +452,16 @@ Metadata dokumen aktif (JSON): %s`, userText, doc.MetadataJSON)
 	}
 
 	// ── 3. LLM Generation ─────────────────────────────────────────────
-	systemPrompt := buildSystemPrompt(ctxInfo, memoryContext, metadataBlock)
+	systemPrompt := buildSystemPrompt(ctxInfo, memoryContext, metadataBlock, targetDocID)
+
+	userMsgContent := userText
+	if targetDocID != "" {
+		userMsgContent = "PERTANYAAN PENGGUNA:\n" + userText
+	}
 
 	messages := []ollama.ChatMessage{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userText},
+		{Role: "user", Content: userMsgContent},
 	}
 
 	o.logger.Info().
@@ -539,22 +532,38 @@ func estimateTokens(s string) int {
 }
 
 // buildSystemPrompt constructs system prompt with bounded RAG context + memory.
-func buildSystemPrompt(ctxInfo rag.PromptContext, memoryContext, metadataBlock string) string {
-	base := `You are a helpful assistant. Answer concisely in the same language as the user's message. Keep answers under 150 words unless the user explicitly asks for detail.
+func buildSystemPrompt(ctxInfo rag.PromptContext, memoryContext, metadataBlock string, targetDocID string) string {
+	if targetDocID != "" && metadataBlock != "" {
+		var sb strings.Builder
+		sb.WriteString("ANDA ADALAH: DOCUMENT-AWARE RAG ASSISTANT\n\n")
+		sb.WriteString("ATURAN ISOLASI KONTEKS DOKUMEN (WAJIB DIPATUHI):\n")
+		sb.WriteString("1. Dokumen yang SEDANG AKTIF dan menjadi rujukan tunggal untuk pertanyaan pengguna saat ini adalah dokumen dengan metadata berikut:\n")
+		sb.WriteString(metadataBlock)
+		sb.WriteString("\n")
+		sb.WriteString("2. Potongan teks (chunks) yang diberikan ke Anda di bawah ini HANYA berasal dari dokumen aktif tersebut. Jika ada potongan teks yang isinya tampak tidak konsisten dengan metadata di atas, abaikan potongan tersebut dan jangan gunakan sebagai dasar jawaban.\n\n")
+		sb.WriteString("3. JANGAN PERNAH mencampur, menggabungkan, atau membandingkan informasi dari dokumen ini dengan dokumen lain yang mungkin pernah dibahas SEBELUMNYA dalam riwayat percakapan ini, KECUALI pengguna secara eksplisit memerintahkan perbandingan (misal: \"bandingkan dokumen A dan B\").\n\n")
+		sb.WriteString(fmt.Sprintf("4. Jika dalam riwayat percakapan terdapat pembahasan tentang dokumen lain (document_id berbeda dari %s), perlakukan pembahasan tersebut sebagai TIDAK RELEVAN untuk menjawab pertanyaan saat ini. Fokus jawaban Anda HARUS 100%% bersumber dari metadata dan chunk dokumen aktif saja.\n\n", targetDocID))
+		sb.WriteString("5. Jika pengguna bertanya dengan frasa ambigu seperti \"dokumen tersebut\", \"dokumen ini\", \"artikel itu\" — TAFSIRKAN SELALU sebagai dokumen aktif yang disebutkan di poin 1, BUKAN dokumen manapun yang dibahas di riwayat percakapan sebelumnya.\n\n")
+		sb.WriteString("6. Sebelum menjawab, lakukan VERIFIKASI INTERNAL: pastikan setiap metode, hasil, atau istilah teknis yang Anda sebutkan dalam jawaban benar-benar muncul dalam chunk/metadata dokumen aktif ini. Jika sebuah istilah teknis (misal nama metode, algoritma, dataset) TIDAK ditemukan dalam chunk yang diberikan, JANGAN menyebutkannya dalam jawaban meskipun istilah itu familiar atau relevan secara umum.\n\n")
 
-When a user asks for a document's title (e.g., "What is the title?"):
-- Return ONLY the actual document title.
-- Do NOT prepend phrases like "File name", "Document type", "Institution name", or "Report type".
-- Example of CORRECT response: "Analisis Pola Pembelian Konsumen Menggunakan Market Basket Analysis"
-- Example of INCORRECT response: "File laporan_project_akhir.pdf memiliki judul..."`
+		sb.WriteString("KONTEN UNTUK DIJAWAB:\n")
+		if ctxInfo.HasResults {
+			ragCtx := ctxInfo.Context
+			if len(ragCtx) > maxContextChars {
+				ragCtx = ragCtx[:maxContextChars] + "\n[...context truncated...]"
+			}
+			sb.WriteString(ragCtx)
+		} else {
+			sb.WriteString("(Tidak ada chunk yang ditemukan)")
+		}
+
+		return sb.String()
+	}
+
+	base := `You are a helpful assistant. Answer concisely in the same language as the user's message. Keep answers under 150 words unless the user explicitly asks for detail.`
 
 	var sb strings.Builder
 	sb.WriteString(base)
-
-	if metadataBlock != "" {
-		sb.WriteString("\n\n")
-		sb.WriteString(metadataBlock)
-	}
 
 	// Memory context (personal facts from previous conversations)
 	if memoryContext != "" {
