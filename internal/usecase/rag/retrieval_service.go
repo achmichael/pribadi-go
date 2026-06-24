@@ -18,7 +18,7 @@ type PromptContext struct {
 
 // RetrievalService handles semantic search
 type RetrievalService interface {
-	Retrieve(ctx context.Context, question string) (PromptContext, error)
+	Retrieve(ctx context.Context, question string, targetDocID string) (PromptContext, error)
 }
 
 type retrievalService struct {
@@ -35,14 +35,15 @@ func NewRetrievalService(vectorRepo repository.VectorRepository, logger *zerolog
 }
 
 // Retrieve searches top relevant chunks
-func (s *retrievalService) Retrieve(ctx context.Context, question string) (PromptContext, error) {
+func (s *retrievalService) Retrieve(ctx context.Context, question string, targetDocID string) (PromptContext, error) {
 	start := time.Now()
 
 	s.logger.Info().
 		Int("query_len", len(question)).
+		Str("target_doc_id", targetDocID).
 		Msg("[retrieval] starting search")
 
-	results, err := s.vectorRepo.Search(ctx, question, 8)
+	results, err := s.vectorRepo.Search(ctx, question, 8, targetDocID)
 	searchDur := time.Since(start)
 
 	if err != nil {

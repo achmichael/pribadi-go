@@ -25,7 +25,7 @@ type SearchResult struct {
 // VectorRepository defines the interface for vector database operations.
 type VectorRepository interface {
 	UpsertDocument(ctx context.Context, id string, content string, metadata map[string]string) error
-	Search(ctx context.Context, query string, topK int) ([]SearchResult, error)
+	Search(ctx context.Context, query string, topK int, filterDocID string) ([]SearchResult, error)
 	Close() error
 }
 
@@ -213,7 +213,7 @@ func (r *qdrantVectorRepo) UpsertDocument(ctx context.Context, id string, conten
 	return nil
 }
 
-func (r *qdrantVectorRepo) Search(ctx context.Context, query string, topK int) ([]SearchResult, error) {
+func (r *qdrantVectorRepo) Search(ctx context.Context, query string, topK int, filterDocID string) ([]SearchResult, error) {
 	start := time.Now()
 
 	// Generate query embedding
@@ -233,7 +233,27 @@ func (r *qdrantVectorRepo) Search(ctx context.Context, query string, topK int) (
 		Dur("embed_ms", embedDur).
 		Msg("[vector_repo] query embedding generated")
 
-	// Search in Qdrant
+	// Build filter if provided
+	var filter *pb.Filter
+	if filterDocID != "" {
+		filter = &pb.Filter{
+			Must: []*pb.Condition{
+				{
+					ConditionOneOf: &pb.Condition_Field{
+						Field: &pb.FieldCondition{
+							Key: "document_id",
+							Match: &pb.Match{
+								MatchValue: &pb.Match_Keyword{
+									Keyword: filterDocID,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
 	searchStart := time.Now()
 	limit := uint64(topK)
 	withPayload := true
@@ -241,6 +261,7 @@ func (r *qdrantVectorRepo) Search(ctx context.Context, query string, topK int) (
 		CollectionName: r.collName,
 		Vector:         queryEmbedding,
 		Limit:          limit,
+		Filter:         filter,
 		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: withPayload}},
 	})
 	searchDur := time.Since(searchStart)

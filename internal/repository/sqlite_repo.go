@@ -79,6 +79,7 @@ type Repository interface {
 	// ── New: user documents ──
 	InsertUserDocument(ctx context.Context, arg InsertUserDocumentParams) error
 	GetLatestUserDocuments(ctx context.Context, userID string, limit int) ([]UserDocument, error)
+	GetUserDocumentByID(ctx context.Context, id string) (*UserDocument, error)
 
 	Close() error
 }
@@ -610,4 +611,25 @@ func (r *sqliteRepo) GetLatestUserDocuments(ctx context.Context, userID string, 
 		results = append(results, d)
 	}
 	return results, rows.Err()
+}
+
+func (r *sqliteRepo) GetUserDocumentByID(ctx context.Context, id string) (*UserDocument, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT id, user_id, platform_msg_id, file_name, title, author, created_at
+		 FROM user_documents
+		 WHERE id = ?`,
+		id,
+	)
+	
+	var d UserDocument
+	if err := row.Scan(
+		&d.ID, &d.UserID, &d.PlatformMsgID,
+		&d.FileName, &d.Title, &d.Author, &d.CreatedAt,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &d, nil
 }

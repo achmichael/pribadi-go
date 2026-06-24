@@ -192,19 +192,19 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 			}
 
 			metaPrompt := `You are the DOCUMENT TITLE EXTRACTION AND IDENTIFICATION AGENT.
-You are responsible for identifying the true document title and author.
-A document may contain file names, document types (e.g., LAPORAN, SKRIPSI), institution names, or report labels. These are NOT the document title.
-The actual title is the primary intellectual work being presented.
-
-PRIORITY ORDER for Title:
-1. Title extracted from cover page.
-2. Largest semantic title on first page.
-
-Format exactly as:
-Title: [Actual Title or Unknown]
-Author: [Author or Unknown]
-
-Document text:
+	You are responsible for identifying the true document title and author.
+	A document may contain file names, document types (e.g., LAPORAN, SKRIPSI), institution names, or report labels. These are NOT the document title.
+	The actual title is the primary intellectual work being presented.
+			
+	PRIORITY ORDER for Title:
+	1. Title extracted from cover page.
+	2. Largest semantic title on first page.
+			
+	Format exactly as:
+	Title: [Actual Title or Unknown]
+	Author: [Author or Unknown]
+			
+	Document text:
 ` + extractText
 			metaMessages := []ollama.ChatMessage{
 				{Role: "user", Content: metaPrompt},
@@ -230,6 +230,9 @@ Document text:
 				Dur("duration_ms", time.Since(metaStart)).
 				Msg("[orchestrator] LLM metadata extraction done")
 
+			docID := uuid.New().String()
+			metadata["document_id"] = docID
+
 			ingStart := time.Now()
 			count, _ := o.ragIngest.IngestText(ctx, text, metadata)
 			o.logger.Info().
@@ -243,8 +246,7 @@ Document text:
 			if docMsg := msg.RawMessage.GetDocumentMessage(); docMsg != nil && docMsg.GetFileName() != "" {
 				fileName = docMsg.GetFileName()
 			}
-			
-			docID := uuid.New().String()
+
 			errDoc := o.repo.InsertUserDocument(ctx, repository.InsertUserDocumentParams{
 				ID:            docID,
 				UserID:        userID,
@@ -285,12 +287,14 @@ Document text:
 	// ── 1.5 Reference Resolution ────────────────────────────────────
 	ragQuery := userText
 	targetDocID := ""
+	metadataBlock := ""
 	if msg.MessageType == whatsapp.MessageTypeText || msg.MessageType == whatsapp.MessageTypeVoiceNote {
 		ragQuery, targetDocID = o.refResolver.ResolveQuery(ctx, userID, userText, sessionID)
 		if targetDocID != "" {
-			// If target document is identified, we could eventually filter Qdrant by source_file=targetDocID
-			// But for now, we just use the rewritten query.
-			_ = targetDocID
+			doc, err := o.repo.GetUserDocumentByID(ctx, targetDocID)
+			if err == nil && doc != nil {
+				metadataBlock = fmt.Sprintf("--- DOCUMENT METADATA ---\nTitle: %s\nAuthor: %s\nFile Name: %s\n--- END METADATA ---\n", doc.Title, doc.Author, doc.FileName)
+			}
 		}
 	}
 
@@ -309,7 +313,7 @@ Document text:
 
 	go func() {
 		retStart := time.Now()
-		ctxInfo, err := o.ragRetrieve.Retrieve(ctx, ragQuery)
+		ctxInfo, err := o.ragRetrieve.Retrieve(ctx, ragQuery, targetDocID)
 		o.logger.Info().
 			Str("msg_id", msg.ID).
 			Bool("has_results", ctxInfo.HasResults).
@@ -347,7 +351,7 @@ Document text:
 	}
 
 	// ── 3. LLM Generation ─────────────────────────────────────────────
-	systemPrompt := buildSystemPrompt(ctxInfo, memoryContext)
+	systemPrompt := buildSystemPrompt(ctxInfo, memoryContext, metadataBlock)
 
 	messages := []ollama.ChatMessage{
 		{Role: "system", Content: systemPrompt},
@@ -398,11 +402,11 @@ Document text:
 		TokenCount:    estimateTokens(userText),
 	})
 	o.repo.InsertMessageV2(ctx, repository.InsertMessageV2Params{
-		UserID:    userID,
-		Platform:  "whatsapp",
-		SessionID: sessionID,
-		Role:      "assistant",
-		Content:   reply,
+		UserID:     userID,
+		Platform:   "whatsapp",
+		SessionID:  sessionID,
+		Role:       "assistant",
+		Content:    reply,
 		TokenCount: estimateTokens(reply),
 	})
 
@@ -422,7 +426,7 @@ func estimateTokens(s string) int {
 }
 
 // buildSystemPrompt constructs system prompt with bounded RAG context + memory.
-func buildSystemPrompt(ctxInfo rag.PromptContext, memoryContext string) string {
+func buildSystemPrompt(ctxInfo rag.PromptContext, memoryContext, metadataBlock string) string {
 	base := `You are a helpful assistant. Answer concisely in the same language as the user's message. Keep answers under 150 words unless the user explicitly asks for detail.
 
 When a user asks for a document's title (e.g., "What is the title?"):
@@ -433,6 +437,11 @@ When a user asks for a document's title (e.g., "What is the title?"):
 
 	var sb strings.Builder
 	sb.WriteString(base)
+
+	if metadataBlock != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(metadataBlock)
+	}
 
 	// Memory context (personal facts from previous conversations)
 	if memoryContext != "" {

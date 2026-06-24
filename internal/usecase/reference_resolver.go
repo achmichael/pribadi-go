@@ -34,30 +34,40 @@ type ResolutionResult struct {
 	TargetDocumentID string `json:"target_document_id"`
 }
 
-const referenceResolutionPrompt = `You are the DOCUMENT REFERENCE RESOLUTION AGENT.
-You are responsible for resolving document references before answering any question.
-The user may refer to previously uploaded documents without explicitly mentioning their names.
+const referenceResolutionPrompt = `You are the DOCUMENT FOCUS AND ACTIVE DOCUMENT MANAGEMENT AGENT.
+You are responsible for resolving document references and maintaining the currently active document.
 
 You have access to:
 * Uploaded document registry
 * Conversation history
 
+## ACTIVE DOCUMENT RULE
+The "active document" is the most recently uploaded document. Only one document can be active at a time.
+A newly uploaded document immediately becomes the active focus and overrides any previous active document.
+
 ## DOCUMENT REGISTRY
 %s
+
+## STRICT PROHIBITION & CONTEXT RESET RULE
+Never answer questions about a previous document merely because it was discussed earlier.
+Do not reuse metadata from older documents. The newest uploaded document always replaces the old focus, UNLESS the user explicitly names a previous document or says "kembali ke dokumen sebelumnya".
+
+## RECENCY PRIORITY RULE
+If the user says things like:
+"dokumen ini", "file tersebut", "judulnya", "penulisnya", "apa judulnya", "isi bab 3", "ringkas dokumen ini", dll.
+
+Resolve using Priority:
+1. active_document (most recently uploaded document)
+2. explicitly named document
+3. clarification request
 
 ## CONVERSATION HISTORY (Last 5 messages)
 %s
 
-## REFERENCE RESOLUTION RULES
-Step 1: Analyze whether the user is referring to a document indirectly.
-Possible references include: dokumen ini, dokumen tersebut, file ini, file tersebut, laporan ini, laporan tersebut, dll.
-Step 2: Attempt to resolve the reference using priority:
-1. Most recently uploaded document
-2. Most recently discussed document
-3. Document referenced in the previous user message
-4. Document referenced in the previous assistant response
-Step 3: If exactly one document can be resolved, rewrite the internal query using the resolved document.
-Example: User: "What is the title of that document?", Rewritten: "What is the title of document_id=doc_002?"
+## TASK
+Step 1: Analyze whether the user is referring to a document indirectly or directly.
+Step 2: Resolve the reference using the strict ACTIVE DOCUMENT RULE.
+Step 3: Rewrite the query by embedding the target_document_id. Example: User: "Siapa penulisnya?", Rewritten: "Siapa penulis dari document_id=doc_002?"
 
 IMPORTANT: Return ONLY a valid JSON object with the following structure, and no other text:
 {
@@ -81,9 +91,13 @@ func (r *referenceResolver) ResolveQuery(ctx context.Context, userID, userText, 
 	}
 
 	var docRegistry strings.Builder
-	for _, doc := range docs {
-		docRegistry.WriteString(fmt.Sprintf("- document_id: %s\n  file_name: %s\n  title: %s\n  author: %s\n  uploaded_at: %s\n\n",
-			doc.ID, doc.FileName, doc.Title, doc.Author, doc.CreatedAt.Format("2006-01-02 15:04:05")))
+	for i, doc := range docs {
+		status := ""
+		if i == 0 {
+			status = " (ACTIVE DOCUMENT - NEWEST UPLOAD)"
+		}
+		docRegistry.WriteString(fmt.Sprintf("- document_id: %s%s\n  file_name: %s\n  title: %s\n  author: %s\n  uploaded_at: %s\n\n",
+			doc.ID, status, doc.FileName, doc.Title, doc.Author, doc.CreatedAt.Format("2006-01-02 15:04:05")))
 	}
 
 	// 2. Fetch conversation history
