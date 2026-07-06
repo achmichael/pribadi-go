@@ -2,10 +2,9 @@ import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 
 interface Config {
-  id: string;
-  config_key: string;
+  key: string;
   value_json: string;
-  description: string;
+  updated_at: string;
 }
 
 const AgentConfig = () => {
@@ -20,7 +19,8 @@ const AgentConfig = () => {
   const fetchConfigs = async () => {
     try {
       const res = await api.get('/config');
-      setConfigs(res.data);
+      // Convert map to array for rendering
+      setConfigs(Object.values(res.data));
     } catch (err) {
       console.error(err);
     } finally {
@@ -31,10 +31,8 @@ const AgentConfig = () => {
   const handleSave = async (config: Config, newValue: string) => {
     try {
       setSaving(true);
-      await api.post('/config', {
-        config_key: config.config_key,
+      await api.put(`/config/${config.key}`, {
         value_json: newValue,
-        description: config.description,
       });
       await fetchConfigs();
     } catch (err) {
@@ -55,10 +53,10 @@ const AgentConfig = () => {
       </div>
       <div className="space-y-6">
         {configs.map((config) => (
-          <div key={config.id} className="bg-white p-6 rounded-lg shadow-sm border">
+          <div key={config.key} className="bg-white p-6 rounded-lg shadow-sm border">
             <div className="mb-4">
-              <h3 className="font-semibold text-lg">{config.config_key}</h3>
-              <p className="text-slate-500 text-sm">{config.description}</p>
+              <h3 className="font-semibold text-lg">{config.key}</h3>
+              <p className="text-slate-500 text-sm">Last updated: {new Date(config.updated_at).toLocaleString()}</p>
             </div>
             <textarea
               className="w-full border rounded-md p-3 font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
