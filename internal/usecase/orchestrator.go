@@ -29,6 +29,7 @@ type orchestrator struct {
 	ragRetrieve   rag.RetrievalService
 	ollama        *ollama.OllamaClient
 	repo          repository.Repository
+	dashboardRepo repository.DashboardRepository
 	memory        factmemory.MemoryManager
 	resolver      *identity.Resolver
 	refResolver   ReferenceResolver
@@ -57,6 +58,7 @@ func NewOrchestrator(
 	ragRetrieve rag.RetrievalService,
 	ollamaClient *ollama.OllamaClient,
 	repo repository.Repository,
+	dashboardRepo repository.DashboardRepository,
 	memory factmemory.MemoryManager,
 	resolver *identity.Resolver,
 	refResolver ReferenceResolver,
@@ -70,6 +72,7 @@ func NewOrchestrator(
 		ragRetrieve:   ragRetrieve,
 		ollama:        ollamaClient,
 		repo:          repo,
+		dashboardRepo: dashboardRepo,
 		memory:        memory,
 		resolver:      resolver,
 		refResolver:   refResolver,
@@ -452,7 +455,7 @@ Metadata dokumen aktif (JSON): %s`, userText, doc.MetadataJSON)
 	}
 
 	// ── 3. LLM Generation ─────────────────────────────────────────────
-	systemPrompt := buildSystemPrompt(ctxInfo, memoryContext, metadataBlock, targetDocID)
+	systemPrompt := o.buildSystemPrompt(ctx, ctxInfo, memoryContext, metadataBlock, targetDocID)
 
 	userMsgContent := userText
 	if targetDocID != "" {
@@ -532,19 +535,37 @@ func estimateTokens(s string) int {
 }
 
 // buildSystemPrompt constructs system prompt with bounded RAG context + memory.
-func buildSystemPrompt(ctxInfo rag.PromptContext, memoryContext, metadataBlock string, targetDocID string) string {
+func (o *orchestrator) buildSystemPrompt(ctx context.Context, ctxInfo rag.PromptContext, memoryContext, metadataBlock string, targetDocID string) string {
+	// Fetch dynamic configuration from Dashboard
+	personaName := "Assistant"
+	personaDesc := "Saya adalah asisten AI yang cerdas dan efisien."
+	tonePref := "formal"
+	promptTemplate := "Anda adalah asisten AI. Identitas Anda: {{persona_name}} ({{persona_description}}). Gaya bahasa: {{tone_preference}}.\n\nFakta: {{user_facts}}\nDokumen: {{active_document_metadata}}\nRAG Context: {{rag_context}}"
+
+	if conf, err := o.dashboardRepo.GetAgentConfigByKey(ctx, "persona_name"); err == nil && conf != nil {
+		json.Unmarshal([]byte(conf.ValueJSON), &personaName)
+	}
+	if conf, err := o.dashboardRepo.GetAgentConfigByKey(ctx, "persona_description"); err == nil && conf != nil {
+		json.Unmarshal([]byte(conf.ValueJSON), &personaDesc)
+	}
+	if conf, err := o.dashboardRepo.GetAgentConfigByKey(ctx, "tone_preference"); err == nil && conf != nil {
+		json.Unmarshal([]byte(conf.ValueJSON), &tonePref)
+	}
+	if conf, err := o.dashboardRepo.GetAgentConfigByKey(ctx, "system_prompt_template"); err == nil && conf != nil {
+		json.Unmarshal([]byte(conf.ValueJSON), &promptTemplate)
+	}
+
 	if targetDocID != "" && metadataBlock != "" {
 		var sb strings.Builder
-		sb.WriteString("ANDA ADALAH: DOCUMENT-AWARE RAG ASSISTANT\n\n")
+		sb.WriteString(fmt.Sprintf("ANDA ADALAH: %s\n%s\nGaya Bahasa: %s\n\n", personaName, personaDesc, tonePref))
 		sb.WriteString("ATURAN ISOLASI KONTEKS DOKUMEN (WAJIB DIPATUHI):\n")
 		sb.WriteString("1. Dokumen yang SEDANG AKTIF dan menjadi rujukan tunggal untuk pertanyaan pengguna saat ini adalah dokumen dengan metadata berikut:\n")
 		sb.WriteString(metadataBlock)
 		sb.WriteString("\n")
 		sb.WriteString("2. Potongan teks (chunks) yang diberikan ke Anda di bawah ini HANYA berasal dari dokumen aktif tersebut. Jika ada potongan teks yang isinya tampak tidak konsisten dengan metadata di atas, abaikan potongan tersebut dan jangan gunakan sebagai dasar jawaban.\n\n")
-		sb.WriteString("3. JANGAN PERNAH mencampur, menggabungkan, atau membandingkan informasi dari dokumen ini dengan dokumen lain yang mungkin pernah dibahas SEBELUMNYA dalam riwayat percakapan ini, KECUALI pengguna secara eksplisit memerintahkan perbandingan (misal: \"bandingkan dokumen A dan B\").\n\n")
+		sb.WriteString("3. JANGAN PERNAH mencampur, menggabungkan, atau membandingkan informasi dari dokumen ini dengan dokumen lain yang mungkin pernah dibahas SEBELUMNYA dalam riwayat percakapan ini, KECUALI pengguna secara eksplisit memerintahkan perbandingan.\n\n")
 		sb.WriteString(fmt.Sprintf("4. Jika dalam riwayat percakapan terdapat pembahasan tentang dokumen lain (document_id berbeda dari %s), perlakukan pembahasan tersebut sebagai TIDAK RELEVAN untuk menjawab pertanyaan saat ini. Fokus jawaban Anda HARUS 100%% bersumber dari metadata dan chunk dokumen aktif saja.\n\n", targetDocID))
-		sb.WriteString("5. Jika pengguna bertanya dengan frasa ambigu seperti \"dokumen tersebut\", \"dokumen ini\", \"artikel itu\" — TAFSIRKAN SELALU sebagai dokumen aktif yang disebutkan di poin 1, BUKAN dokumen manapun yang dibahas di riwayat percakapan sebelumnya.\n\n")
-		sb.WriteString("6. Sebelum menjawab, lakukan VERIFIKASI INTERNAL: pastikan setiap metode, hasil, atau istilah teknis yang Anda sebutkan dalam jawaban benar-benar muncul dalam chunk/metadata dokumen aktif ini. Jika sebuah istilah teknis (misal nama metode, algoritma, dataset) TIDAK ditemukan dalam chunk yang diberikan, JANGAN menyebutkannya dalam jawaban meskipun istilah itu familiar atau relevan secara umum.\n\n")
+		sb.WriteString("5. Sebelum menjawab, lakukan VERIFIKASI INTERNAL: pastikan setiap metode, hasil, atau istilah teknis yang Anda sebutkan dalam jawaban benar-benar muncul dalam chunk/metadata dokumen aktif ini.\n\n")
 
 		sb.WriteString("KONTEN UNTUK DIJAWAB:\n")
 		if ctxInfo.HasResults {
@@ -560,35 +581,32 @@ func buildSystemPrompt(ctxInfo rag.PromptContext, memoryContext, metadataBlock s
 		return sb.String()
 	}
 
-	base := `You are a helpful assistant. Answer concisely in the same language as the user's message. Keep answers under 150 words unless the user explicitly asks for detail.`
-
-	var sb strings.Builder
-	sb.WriteString(base)
-
-	// Memory context (personal facts from previous conversations)
+	// Normal dynamic prompt
+	sysPrompt := promptTemplate
+	sysPrompt = strings.ReplaceAll(sysPrompt, "{{persona_name}}", personaName)
+	sysPrompt = strings.ReplaceAll(sysPrompt, "{{persona_description}}", personaDesc)
+	sysPrompt = strings.ReplaceAll(sysPrompt, "{{tone_preference}}", tonePref)
+	
 	if memoryContext != "" {
-		sb.WriteString("\n\n")
-		sb.WriteString(memoryContext)
+		sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", memoryContext)
+	} else {
+		sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", "(Tidak ada fakta relevan)")
 	}
+	
+	sysPrompt = strings.ReplaceAll(sysPrompt, "{{active_document_metadata}}", "(Tidak ada dokumen aktif)")
 
-	// RAG document context
 	if ctxInfo.HasResults {
 		ragCtx := ctxInfo.Context
 		if len(ragCtx) > maxContextChars {
 			ragCtx = ragCtx[:maxContextChars] + "\n[...context truncated...]"
 		}
-
-		sb.WriteString("\n\nUse the following context from stored documents to help answer. ")
-		sb.WriteString("If the context is not relevant, ignore it.\n\n")
-		sb.WriteString("--- CONTEXT ---\n")
-		sb.WriteString(ragCtx)
-		sb.WriteString("\n--- END CONTEXT ---")
-
+		sysPrompt = strings.ReplaceAll(sysPrompt, "{{rag_context}}", ragCtx)
 		if len(ctxInfo.Sources) > 0 {
-			sb.WriteString("\n\nSources: ")
-			sb.WriteString(strings.Join(ctxInfo.Sources, ", "))
+			sysPrompt += "\n\nSources: " + strings.Join(ctxInfo.Sources, ", ")
 		}
+	} else {
+		sysPrompt = strings.ReplaceAll(sysPrompt, "{{rag_context}}", "")
 	}
 
-	return sb.String()
+	return sysPrompt
 }

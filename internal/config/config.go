@@ -21,6 +21,8 @@ type Config struct {
 	WebhookSecret    string `envconfig:"WEBHOOK_SECRET" default:""`
 	NotifyJIDs       string `envconfig:"NOTIFY_JIDS" required:"true"`
 	FlorenceURL      string `envconfig:"FLORENCE_URL" default:"http://localhost:8100"`
+	DashboardPort    string `envconfig:"DASHBOARD_PORT" default:"8081"`
+	DashboardJWT     string `envconfig:"DASHBOARD_JWT_SECRET" default:"pribadi-secret-key"`
 }
 
 // Load reads configuration from .env file and environment variables
