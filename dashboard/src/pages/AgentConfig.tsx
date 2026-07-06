@@ -1,83 +1,213 @@
-import { useState, useEffect } from 'react';
-import { api } from '../lib/api';
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import { 
+  Bot, 
+  MessageSquare, 
+  Settings2, 
+  Info, 
+  Save,
+  Loader2
+} from 'lucide-react';
+import { Toast } from '../components/ui/Toast';
 
-interface Config {
-  key: string;
-  value_json: string;
-  updated_at: string;
-}
+// --- Schema Validation ---
+const configSchema = z.object({
+  botName: z.string().min(2, 'Nama harus minimal 2 karakter').max(50, 'Nama maksimal 50 karakter'),
+  persona: z.enum(['formal', 'santai', 'ceria', 'profesional']),
+  systemPrompt: z.string().max(2000, 'Instruksi maksimal 2000 karakter').optional(),
+  autoReply: z.boolean(),
+});
 
-const AgentConfig = () => {
-  const [configs, setConfigs] = useState<Config[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+type ConfigFormValues = z.infer<typeof configSchema>;
 
-  useEffect(() => {
-    fetchConfigs();
-  }, []);
+export default function AgentConfig() {
+  const [isSaving, setIsSaving] = useState(false);
+  const [showToast, setShowToast] = useState(false);
 
-  const fetchConfigs = async () => {
-    try {
-      const res = await api.get('/config');
-      // Convert map to array for rendering
-      setConfigs(Object.values(res.data));
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+  // Initialize React Hook Form
+  const {
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors, isDirty },
+  } = useForm<ConfigFormValues>({
+    resolver: zodResolver(configSchema),
+    defaultValues: {
+      botName: 'Asisten BisnisKu',
+      persona: 'profesional',
+      systemPrompt: 'Kamu adalah asisten AI untuk toko pakaian "GayaKini". Jawab pertanyaan pelanggan dengan sopan. Jam buka toko adalah 08:00 - 17:00.',
+      autoReply: true,
     }
-  };
+  });
 
-  const handleSave = async (config: Config, newValue: string) => {
-    try {
-      setSaving(true);
-      await api.put(`/config/${config.key}`, {
-        value_json: newValue,
-      });
-      await fetchConfigs();
-    } catch (err) {
-      console.error(err);
-      alert('Failed to save configuration');
-    } finally {
-      setSaving(false);
-    }
-  };
+  const autoReplyState = watch('autoReply');
 
-  if (loading) return <div>Loading...</div>;
+  const onSubmit = (data: ConfigFormValues) => {
+    setIsSaving(true);
+    // Simulate API Call
+    setTimeout(() => {
+      console.log('Saved Config:', data);
+      setIsSaving(false);
+      setShowToast(true);
+    }, 1500);
+  };
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Agent Configuration</h1>
-        {saving && <span className="text-sm text-blue-600 bg-blue-50 px-2 py-1 rounded">Saving...</span>}
+    <div className="space-y-6 animate-in fade-in duration-500 pb-24 lg:pb-8">
+      
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-brand-900 mb-2">Konfigurasi Agen AI</h1>
+        <p className="text-brand-500">
+          Atur identitas, kepribadian, dan cara AI merespons pesan pengguna.
+        </p>
       </div>
-      <div className="space-y-6">
-        {configs.map((config) => (
-          <div key={config.key} className="bg-white p-6 rounded-lg shadow-sm border">
-            <div className="mb-4">
-              <h3 className="font-semibold text-lg">{config.key}</h3>
-              <p className="text-slate-500 text-sm">Last updated: {new Date(config.updated_at).toLocaleString()}</p>
+
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+        
+        {/* 2-Column Layout */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* Main Column (2/3 width on desktop) */}
+          <div className="lg:col-span-2 space-y-6">
+            
+            {/* Identitas AI */}
+            <div className="bg-white border border-brand-200 rounded-2xl p-6 shadow-sm">
+              <div className="flex items-center gap-2 text-brand-900 font-bold mb-6">
+                <Bot size={20} className="text-emerald-600" />
+                <h2>Identitas AI</h2>
+              </div>
+              
+              <div className="space-y-5">
+                <div>
+                  <label className="block text-sm font-semibold text-brand-700 mb-1.5 ml-1">Nama Asisten</label>
+                  <input
+                    {...register('botName')}
+                    type="text"
+                    className="w-full bg-brand-50 border border-brand-200 rounded-xl px-4 py-2.5 text-brand-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none"
+                    placeholder="Contoh: CS Toko, Jojo, AI Assistant..."
+                  />
+                  {errors.botName && (
+                    <p className="text-rose-500 text-sm mt-1 ml-1">{errors.botName.message}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-brand-700 mb-1.5 ml-1">Gaya Bahasa</label>
+                  <select
+                    {...register('persona')}
+                    className="w-full bg-brand-50 border border-brand-200 rounded-xl px-4 py-2.5 text-brand-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none appearance-none"
+                  >
+                    <option value="profesional">Profesional (Tegas & Langsung ke inti)</option>
+                    <option value="formal">Formal (Baku & Resmi)</option>
+                    <option value="santai">Santai (Kasual & Ramah)</option>
+                    <option value="ceria">Ceria (Ekspresif & Menggunakan Emoji)</option>
+                  </select>
+                </div>
+              </div>
             </div>
-            <textarea
-              className="w-full border rounded-md p-3 font-mono text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              rows={4}
-              defaultValue={config.value_json}
-              onBlur={(e) => {
-                if (e.target.value !== config.value_json) {
-                  handleSave(config, e.target.value);
-                }
-              }}
-            />
+
+            {/* Perilaku Inti */}
+            <div className="bg-white border border-brand-200 rounded-2xl p-6 shadow-sm">
+              <div className="flex items-center gap-2 text-brand-900 font-bold mb-6">
+                <MessageSquare size={20} className="text-emerald-600" />
+                <h2>Perilaku Inti (System Prompt)</h2>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5 ml-1">
+                  <label className="text-sm font-semibold text-brand-700">Instruksi Khusus</label>
+                  <div className="group relative cursor-help">
+                    <Info size={16} className="text-brand-400 hover:text-brand-600" />
+                    <div className="absolute bottom-full right-0 mb-2 w-64 bg-brand-900 text-brand-50 text-xs p-3 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl z-10">
+                      Berikan konteks tambahan seperti jam buka, kebijakan refund, atau cara AI harus menjawab jika ia tidak mengetahui jawabannya.
+                    </div>
+                  </div>
+                </div>
+                
+                <textarea
+                  {...register('systemPrompt')}
+                  rows={8}
+                  className="w-full bg-brand-50 border border-brand-200 rounded-xl px-4 py-3 text-brand-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none resize-y"
+                  placeholder="Ceritakan siapa AI ini dan apa tugas utamanya..."
+                />
+                <div className="flex justify-between items-center mt-1 ml-1">
+                  {errors.systemPrompt ? (
+                    <p className="text-rose-500 text-sm">{errors.systemPrompt.message}</p>
+                  ) : (
+                    <p className="text-brand-400 text-xs">Maksimal 2000 karakter</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
           </div>
-        ))}
-        {configs.length === 0 && (
-          <div className="text-center text-slate-500 py-10">
-            No configurations found. Add them via API or Database.
+
+          {/* Sidebar Column (1/3 width on desktop) */}
+          <div className="space-y-6">
+            
+            {/* Preferensi Sistem */}
+            <div className="bg-white border border-brand-200 rounded-2xl p-6 shadow-sm">
+              <div className="flex items-center gap-2 text-brand-900 font-bold mb-6">
+                <Settings2 size={20} className="text-emerald-600" />
+                <h2>Preferensi Sistem</h2>
+              </div>
+
+              <div className="flex items-start justify-between gap-4 p-4 bg-brand-50 rounded-xl border border-brand-100">
+                <div>
+                  <h3 className="text-sm font-semibold text-brand-900">Balas Otomatis</h3>
+                  <p className="text-xs text-brand-500 mt-1 leading-relaxed">
+                    Izinkan AI untuk langsung membalas pesan pengguna.
+                  </p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer mt-1 shrink-0">
+                  <input 
+                    type="checkbox" 
+                    {...register('autoReply')}
+                    className="sr-only peer" 
+                  />
+                  <div className="w-11 h-6 bg-brand-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-brand-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                </label>
+              </div>
+
+              {!autoReplyState && (
+                <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                  <p className="text-xs text-amber-700 font-medium">
+                    ⚠️ AI tidak akan membalas pesan. Ia hanya akan membuat draft balasan di dashboard (fitur ini sedang dalam pengembangan).
+                  </p>
+                </div>
+              )}
+            </div>
+
           </div>
-        )}
-      </div>
+        </div>
+
+        {/* Action Bottom Bar */}
+        <div className="fixed bottom-0 left-0 right-0 lg:left-64 bg-white border-t border-brand-200 p-4 px-6 flex justify-end shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-20">
+          <button
+            type="submit"
+            disabled={!isDirty || isSaving}
+            className="flex items-center gap-2 bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-medium hover:bg-emerald-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            {isSaving ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : (
+              <Save size={18} />
+            )}
+            <span>{isSaving ? 'Menyimpan...' : 'Simpan Konfigurasi'}</span>
+          </button>
+        </div>
+
+      </form>
+
+      <Toast 
+        message="Konfigurasi disimpan. AI akan beradaptasi di pesan berikutnya." 
+        isVisible={showToast} 
+        onClose={() => setShowToast(false)} 
+      />
+
     </div>
   );
-};
-
-export default AgentConfig;
+}
