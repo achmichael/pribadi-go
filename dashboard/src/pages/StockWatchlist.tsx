@@ -56,7 +56,7 @@ const StockWatchlist = () => {
         is_active: !stock.is_active,
       });
       fetchStocks();
-    } catch (err) {
+    } catch {
       alert("Failed to toggle stock status");
     }
   };
