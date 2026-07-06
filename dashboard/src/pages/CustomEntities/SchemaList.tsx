@@ -1,80 +1,138 @@
-import { useState, useEffect } from 'react';
-import { api } from '../../lib/api';
-import { Link } from 'react-router-dom';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Database, Plus, Edit2, Trash2, List } from 'lucide-react';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 
-interface Schema {
+interface SchemaItem {
   id: string;
   name: string;
   description: string;
-  created_at: string;
+  fieldCount: number;
 }
 
-const SchemaList = () => {
-  const [schemas, setSchemas] = useState<Schema[]>([]);
-  const [loading, setLoading] = useState(true);
+const MOCK_SCHEMAS: SchemaItem[] = [
+  { id: '1', name: 'Order Penjualan', description: 'Format standar untuk menangkap pesanan dari pelanggan.', fieldCount: 5 },
+  { id: '2', name: 'Data Lead', description: 'Formulir kontak untuk calon pelanggan baru.', fieldCount: 3 },
+];
 
-  useEffect(() => {
-    fetchSchemas();
-  }, []);
+export default function SchemaList() {
+  const navigate = useNavigate();
+  const [schemas, setSchemas] = useState<SchemaItem[]>(MOCK_SCHEMAS);
+  const [schemaToDelete, setSchemaToDelete] = useState<string | null>(null);
 
-  const fetchSchemas = async () => {
-    try {
-      const res = await api.get('/entities/schemas');
-      setSchemas(res.data || []);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
+  const handleDelete = () => {
+    if (schemaToDelete) {
+      setSchemas(schemas.filter(s => s.id !== schemaToDelete));
+      setSchemaToDelete(null);
     }
   };
 
-  if (loading) return <div>Loading...</div>;
-
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Custom Entities</h1>
-        <Link
-          to="/entities/new"
-          className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
+    <div className="space-y-6 animate-in fade-in duration-500 pb-20 lg:pb-8">
+      
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-brand-900 mb-2">Entitas Kustom</h1>
+          <p className="text-brand-500">
+            Definisikan struktur data yang akan diekstraksi AI dari percakapan.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/data-types/new')}
+          className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-medium hover:bg-emerald-700 transition-colors shadow-sm"
         >
-          Create Schema
-        </Link>
+          <Plus size={18} />
+          <span>Buat Entitas</span>
+        </button>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-        <table className="w-full text-left">
-          <thead className="bg-slate-50 border-b">
-            <tr>
-              <th className="px-6 py-3 font-medium text-slate-500">Name</th>
-              <th className="px-6 py-3 font-medium text-slate-500">Description</th>
-              <th className="px-6 py-3 font-medium text-slate-500">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {schemas.map((s) => (
-              <tr key={s.id} className="hover:bg-slate-50 transition-colors">
-                <td className="px-6 py-4 font-medium text-slate-900">{s.name}</td>
-                <td className="px-6 py-4 text-slate-500">{s.description}</td>
-                <td className="px-6 py-4 space-x-4">
-                  <Link to={`/entities/${s.id}/records`} className="text-blue-600 hover:text-blue-800">
-                    View Records
-                  </Link>
-                </td>
-              </tr>
-            ))}
-            {schemas.length === 0 && (
-              <tr>
-                <td colSpan={3} className="px-6 py-8 text-center text-slate-500">
-                  No schemas found. Create one to get started.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      {/* List / Empty State */}
+      <div className="bg-white border border-brand-200 rounded-2xl shadow-sm overflow-hidden">
+        {schemas.length === 0 ? (
+          <div className="py-16">
+            <EmptyState 
+              icon={Database}
+              title="Belum ada Entitas"
+              description="Buat entitas kustom pertama Anda agar AI tahu format data apa yang harus dikumpulkan."
+              action={{
+                label: "Buat Entitas Sekarang",
+                onClick: () => navigate('/data-types/new')
+              }}
+            />
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-brand-50/50 text-brand-500 text-xs uppercase tracking-wider border-b border-brand-100">
+                  <th className="px-6 py-4 font-semibold">Nama Entitas</th>
+                  <th className="px-6 py-4 font-semibold hidden sm:table-cell">Deskripsi</th>
+                  <th className="px-6 py-4 font-semibold">Fields</th>
+                  <th className="px-6 py-4 font-semibold text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-brand-100">
+                {schemas.map((schema) => (
+                  <tr key={schema.id} className="hover:bg-brand-50/50 transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-brand-100 text-brand-600 rounded-lg shrink-0">
+                          <Database size={18} />
+                        </div>
+                        <span className="font-semibold text-brand-900">{schema.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-brand-500 hidden sm:table-cell">
+                      {schema.description}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className="inline-flex items-center justify-center bg-brand-100 text-brand-700 text-xs font-bold px-2.5 py-1 rounded-md">
+                        {schema.fieldCount}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button 
+                          title="Lihat Data"
+                          onClick={() => navigate(`/data-types/${schema.id}/records`)}
+                          className="p-2 text-brand-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                        >
+                          <List size={18} />
+                        </button>
+                        <button 
+                          title="Edit"
+                          onClick={() => navigate(`/data-types/${schema.id}/edit`)}
+                          className="p-2 text-brand-400 hover:text-brand-700 hover:bg-brand-100 rounded-lg transition-colors"
+                        >
+                          <Edit2 size={18} />
+                        </button>
+                        <button 
+                          onClick={() => setSchemaToDelete(schema.id)}
+                          title="Hapus"
+                          className="p-2 text-brand-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
+
+      <ConfirmDialog 
+        isOpen={schemaToDelete !== null}
+        onClose={() => setSchemaToDelete(null)}
+        onConfirm={handleDelete}
+        title="Hapus Entitas?"
+        message="Entitas dan semua datanya yang telah dikumpulkan tidak dapat dikembalikan. Yakin ingin menghapus?"
+        confirmLabel="Ya, Hapus"
+      />
     </div>
   );
-};
-
-export default SchemaList;
+}
