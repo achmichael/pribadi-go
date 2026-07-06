@@ -3,6 +3,8 @@ package rest
 import (
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -94,7 +96,29 @@ func NewServer(service usecase.DashboardService, jwtSecret string, logger *zerol
 		})
 	})
 
+	// Serve static files for Dashboard SPA
+	srv.serveSPA(r, "dashboard/dist")
+
 	return srv
+}
+
+func (s *Server) serveSPA(r chi.Router, publicDir string) {
+	fs := http.FileServer(http.Dir(publicDir))
+
+	r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+		path := req.URL.Path
+		if path == "/" {
+			path = "/index.html"
+		}
+
+		fullPath := filepath.Join(publicDir, filepath.Clean(path))
+		if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+			http.ServeFile(w, req, filepath.Join(publicDir, "index.html"))
+			return
+		}
+
+		fs.ServeHTTP(w, req)
+	})
 }
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
