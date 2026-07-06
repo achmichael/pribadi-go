@@ -3,11 +3,10 @@ import { api } from "../lib/api";
 
 interface Stock {
   id: string;
-  ticker_symbol: string;
-  target_price: number | null;
-  condition: string;
+  ticker: string;
+  threshold_value: number;
+  alert_condition: string;
   is_active: boolean;
-  notes: string;
 }
 
 const StockWatchlist = () => {
@@ -16,7 +15,6 @@ const StockWatchlist = () => {
   const [ticker, setTicker] = useState("");
   const [targetPrice, setTargetPrice] = useState("");
   const [condition, setCondition] = useState("above");
-  const [notes, setNotes] = useState("");
 
   useEffect(() => {
     fetchStocks();
@@ -25,7 +23,7 @@ const StockWatchlist = () => {
   const fetchStocks = async () => {
     try {
       const res = await api.get("/stocks");
-      setStocks(res.data);
+      setStocks(res.data || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -37,15 +35,14 @@ const StockWatchlist = () => {
     e.preventDefault();
     try {
       await api.post("/stocks", {
-        ticker_symbol: ticker.toUpperCase(),
-        target_price: parseFloat(targetPrice) || null,
-        condition: condition,
+        ticker: ticker.toUpperCase(),
+        exchange: "IDX",
+        threshold_value: parseFloat(targetPrice) || 0,
+        alert_condition: condition,
         is_active: true,
-        notes: notes,
       });
       setTicker("");
       setTargetPrice("");
-      setNotes("");
       fetchStocks();
     } catch (err: any) {
       alert("Failed to add stock: " + err.message);
@@ -114,16 +111,6 @@ const StockWatchlist = () => {
                   <option value="below">Below Target</option>
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Notes</label>
-                <input
-                  type="text"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="e.g. Sell if reached"
-                  className="w-full border rounded-md px-3 py-2"
-                />
-              </div>
               <button
                 type="submit"
                 className="w-full bg-blue-600 text-white rounded-md py-2 font-medium hover:bg-blue-700"
@@ -157,12 +144,12 @@ const StockWatchlist = () => {
                 {stocks.map((s) => (
                   <tr key={s.id} className="hover:bg-slate-50">
                     <td className="px-6 py-4 font-bold text-slate-900">
-                      {s.ticker_symbol}
+                      {s.ticker}
                     </td>
                     <td className="px-6 py-4">
-                      {s.target_price ? `$${s.target_price}` : "-"}
+                      {s.threshold_value ? `$${s.threshold_value}` : "-"}
                     </td>
-                    <td className="px-6 py-4">{s.condition}</td>
+                    <td className="px-6 py-4">{s.alert_condition}</td>
                     <td className="px-6 py-4">
                       <button
                         onClick={() => toggleActive(s)}

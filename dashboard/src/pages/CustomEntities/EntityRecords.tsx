@@ -31,7 +31,7 @@ const EntityRecords = () => {
         api.get(`/entities/schemas/${id}/records`)
       ]);
       setSchema(JSON.parse(schemaRes.data.fields_json));
-      setRecords(recordsRes.data);
+      setRecords(recordsRes.data || []);
     } catch (err) {
       console.error(err);
     } finally {

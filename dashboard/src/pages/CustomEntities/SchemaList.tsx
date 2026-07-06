@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 
 interface Schema {
   id: string;
-  entity_name: string;
+  name: string;
   description: string;
   created_at: string;
 }
@@ -20,7 +20,7 @@ const SchemaList = () => {
   const fetchSchemas = async () => {
     try {
       const res = await api.get('/entities/schemas');
-      setSchemas(res.data);
+      setSchemas(res.data || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -54,10 +54,10 @@ const SchemaList = () => {
           <tbody className="divide-y">
             {schemas.map((s) => (
               <tr key={s.id} className="hover:bg-slate-50 transition-colors">
-                <td className="px-6 py-4 font-medium text-slate-900">{s.entity_name}</td>
+                <td className="px-6 py-4 font-medium text-slate-900">{s.name}</td>
                 <td className="px-6 py-4 text-slate-500">{s.description}</td>
                 <td className="px-6 py-4 space-x-4">
-                  <Link to={`/entities/${s.entity_name}/records`} className="text-blue-600 hover:text-blue-800">
+                  <Link to={`/entities/${s.id}/records`} className="text-blue-600 hover:text-blue-800">
                     View Records
                   </Link>
                 </td>

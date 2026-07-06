@@ -21,7 +21,7 @@ const JobList = () => {
   const fetchJobs = async () => {
     try {
       const res = await api.get('/cron');
-      setJobs(res.data);
+      setJobs(res.data || []);
     } catch (err) {
       console.error(err);
     } finally {
