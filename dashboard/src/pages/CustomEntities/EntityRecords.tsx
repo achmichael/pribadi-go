@@ -1,124 +1,208 @@
 import { useState, useEffect } from 'react';
-import { api } from '../../lib/api';
-import { useParams, Link } from 'react-router-dom';
-import Form from '@rjsf/core';
-import validator from '@rjsf/validator-ajv8';
+import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Download, MessageCircle, FileSpreadsheet } from 'lucide-react';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { Modal } from '../../components/ui/Modal';
 
-interface Record {
-  id: string;
-  data_json: string;
-  created_at: string;
-}
+// --- MOCK DATA ---
+const MOCK_SCHEMA = {
+  title: 'Order Penjualan',
+  properties: {
+    namaPelanggan: { title: 'Nama Pelanggan', type: 'string' },
+    produk: { title: 'Produk (SKU)', type: 'string' },
+    jumlah: { title: 'Jumlah', type: 'number' },
+    alamat: { title: 'Alamat Pengiriman', type: 'string' }
+  }
+};
 
-const EntityRecords = () => {
-  const { id } = useParams<{ id: string }>(); // Using entity_name actually as per the route
-  const [schema, setSchema] = useState<any>(null);
-  const [records, setRecords] = useState<Record[]>([]);
+const MOCK_RECORDS = [
+  {
+    id: 'rec-101',
+    created_at: '2024-05-12T10:30:00Z',
+    data: {
+      namaPelanggan: 'Budi Santoso',
+      produk: 'TSHIRT-BLK-L',
+      jumlah: 2,
+      alamat: 'Jl. Merdeka No. 45, Jakarta'
+    },
+    source_chat: 'Halo min, saya mau pesan kaos hitam ukuran L 2 pcs, kirim ke Jl. Merdeka No. 45 Jakarta ya.'
+  },
+  {
+    id: 'rec-102',
+    created_at: '2024-05-12T11:15:00Z',
+    data: {
+      namaPelanggan: 'Siti Aminah',
+      produk: 'JACKET-BLU-M',
+      jumlah: 1,
+      alamat: 'Komp. Mawar Blok B/12, Bandung'
+    },
+    source_chat: 'Pesen jaket biru size M 1 biji dong, alamatnya di Komp. Mawar Blok B/12 Bandung. Bisa COD?'
+  }
+];
+
+export default function EntityRecords() {
+  const { id } = useParams<{ id: string }>(); // Entity ID
+  const navigate = useNavigate();
+  
   const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [formData, setFormData] = useState<any>({});
+  const [selectedChat, setSelectedChat] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchData();
+    // Simulate fetching data based on ID
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 800);
+    return () => clearTimeout(timer);
   }, [id]);
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      // We expect id to be entity_name
-      const [schemaRes, recordsRes] = await Promise.all([
-        api.get(`/entities/schemas/${id}`),
-        api.get(`/entities/schemas/${id}/records`)
-      ]);
-      setSchema(JSON.parse(schemaRes.data.fields_json));
-      setRecords(recordsRes.data || []);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+  const handleExportCSV = () => {
+    if (MOCK_RECORDS.length === 0) return;
+
+    // Build headers from schema
+    const keys = Object.keys(MOCK_SCHEMA.properties);
+    const headers = ['ID', 'Waktu Ekstraksi', ...keys.map(k => (MOCK_SCHEMA.properties as any)[k].title)];
+    
+    // Build rows
+    const rows = MOCK_RECORDS.map(record => {
+      const rowData = keys.map(k => `"${(record.data as any)[k] || ''}"`);
+      return [`"${record.id}"`, `"${new Date(record.created_at).toLocaleString()}"`, ...rowData].join(',');
+    });
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `${MOCK_SCHEMA.title}_export.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
-  const handleSubmit = async (e: any) => {
-    try {
-      await api.post(`/entities/schemas/${id}/records`, {
-        data_json: JSON.stringify(e.formData)
-      });
-      setShowForm(false);
-      setFormData({});
-      fetchData();
-    } catch (err: any) {
-      alert('Failed to save record: ' + (err.response?.data?.error || err.message));
-    }
-  };
-
-  if (loading) return <div>Loading...</div>;
-  if (!schema) return <div>Schema not found</div>;
+  const schemaKeys = Object.keys(MOCK_SCHEMA.properties);
 
   return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <Link to="/entities" className="text-blue-600 hover:underline text-sm mb-2 inline-block">&larr; Back to Schemas</Link>
-          <h1 className="text-2xl font-bold">Records for {id}</h1>
+    <div className="space-y-6 animate-in fade-in duration-500 pb-20 lg:pb-8">
+      
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => navigate('/data-types')}
+            className="p-2 text-brand-400 hover:text-brand-700 bg-white border border-brand-200 rounded-xl hover:bg-brand-50 transition-colors shadow-sm"
+          >
+            <ArrowLeft size={20} />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-brand-900">Data {MOCK_SCHEMA.title}</h1>
+            <p className="text-sm text-brand-500">Data ini diekstraksi secara otomatis oleh AI dari percakapan.</p>
+          </div>
         </div>
+        
         <button
-          onClick={() => setShowForm(!showForm)}
-          className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
+          onClick={handleExportCSV}
+          disabled={loading || MOCK_RECORDS.length === 0}
+          className="flex items-center justify-center gap-2 bg-white text-brand-700 border border-brand-200 px-5 py-2.5 rounded-xl font-medium hover:bg-brand-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
         >
-          {showForm ? 'Cancel' : 'Add Record'}
+          <Download size={18} />
+          <span>Export CSV</span>
         </button>
       </div>
 
-      {showForm && (
-        <div className="bg-white p-6 rounded-lg shadow-sm border mb-6 max-w-3xl">
-          <Form
-            schema={schema}
-            validator={validator}
-            formData={formData}
-            onChange={(e) => setFormData(e.formData)}
-            onSubmit={handleSubmit}
-            className="rjsf-tailwind"
-          />
-        </div>
-      )}
-
-      <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 border-b">
-            <tr>
-              <th className="px-6 py-3 font-medium text-slate-500">ID</th>
-              <th className="px-6 py-3 font-medium text-slate-500">Data</th>
-              <th className="px-6 py-3 font-medium text-slate-500">Created At</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {records.map((r) => {
-              const data = JSON.parse(r.data_json);
-              return (
-                <tr key={r.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4 text-slate-500 font-mono text-xs">{r.id.split('-')[0]}...</td>
-                  <td className="px-6 py-4">
-                    <pre className="bg-slate-100 p-2 rounded text-xs overflow-x-auto max-w-lg">
-                      {JSON.stringify(data, null, 2)}
-                    </pre>
-                  </td>
-                  <td className="px-6 py-4 text-slate-500">{new Date(r.created_at).toLocaleString()}</td>
+      {/* Content */}
+      <div className="bg-white border border-brand-200 rounded-2xl shadow-sm overflow-hidden">
+        {loading ? (
+          <div className="py-24 text-center text-brand-400">
+            <div className="animate-pulse flex flex-col items-center">
+              <div className="w-12 h-12 bg-brand-100 rounded-xl mb-4"></div>
+              <div className="h-4 bg-brand-100 rounded w-48 mb-2"></div>
+              <div className="h-3 bg-brand-50 rounded w-32"></div>
+            </div>
+          </div>
+        ) : MOCK_RECORDS.length === 0 ? (
+          <div className="py-16">
+            <EmptyState 
+              icon={FileSpreadsheet}
+              title="Belum ada Data"
+              description="AI belum mengekstrak data apapun untuk entitas ini. Data akan muncul otomatis saat ada percakapan yang relevan."
+            />
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-brand-50/50 text-brand-500 text-xs uppercase tracking-wider border-b border-brand-100">
+                  <th className="px-6 py-4 font-semibold whitespace-nowrap">Waktu</th>
+                  {/* Dynamic Columns from Schema */}
+                  {schemaKeys.map((key) => (
+                    <th key={key} className="px-6 py-4 font-semibold whitespace-nowrap">
+                      {(MOCK_SCHEMA.properties as any)[key].title}
+                    </th>
+                  ))}
+                  <th className="px-6 py-4 font-semibold text-right">Aksi</th>
                 </tr>
-              );
-            })}
-            {records.length === 0 && (
-              <tr>
-                <td colSpan={3} className="px-6 py-8 text-center text-slate-500">
-                  No records found.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody className="divide-y divide-brand-100">
+                {MOCK_RECORDS.map((record) => (
+                  <tr key={record.id} className="hover:bg-brand-50/50 transition-colors">
+                    <td className="px-6 py-4 text-sm text-brand-500 whitespace-nowrap">
+                      {new Date(record.created_at).toLocaleString('id-ID', {
+                        day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+                      })}
+                    </td>
+                    
+                    {/* Dynamic Data Cells */}
+                    {schemaKeys.map((key) => (
+                      <td key={key} className="px-6 py-4 text-brand-900 max-w-[200px] truncate">
+                        {(record.data as any)[key] || '-'}
+                      </td>
+                    ))}
+
+                    <td className="px-6 py-4 text-right">
+                      <button 
+                        onClick={() => setSelectedChat(record.source_chat)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-100 text-brand-700 hover:bg-brand-200 hover:text-brand-900 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        <MessageCircle size={16} />
+                        <span className="hidden sm:inline">Lihat Chat</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
+
+      {/* Chat Traceback Modal */}
+      <Modal
+        isOpen={selectedChat !== null}
+        onClose={() => setSelectedChat(null)}
+        title="Cuplikan Sumber Chat"
+      >
+        <div className="mt-2 space-y-4">
+          <p className="text-sm text-brand-500">
+            Berikut adalah cuplikan pesan mentah dari pelanggan yang diekstraksi oleh AI menjadi format terstruktur:
+          </p>
+          
+          <div className="bg-[#E5DDD5] p-4 rounded-xl max-w-sm">
+            <div className="bg-white rounded-lg p-3 shadow-sm relative text-sm text-gray-800">
+              {selectedChat}
+              <div className="absolute top-0 -left-2 w-0 h-0 border-t-[10px] border-t-white border-l-[12px] border-l-transparent"></div>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-4 border-t border-brand-100">
+            <button 
+              onClick={() => setSelectedChat(null)}
+              className="bg-brand-100 text-brand-700 px-5 py-2 rounded-lg font-medium hover:bg-brand-200 transition-colors"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
+      </Modal>
+
     </div>
   );
-};
-
-export default EntityRecords;
+}
