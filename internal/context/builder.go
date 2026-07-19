@@ -42,6 +42,10 @@ type BuildParams struct {
 
 	// Conversation history messages to include
 	HistoryLimit int
+
+	// Plan-based filtering (Phase 2)
+	SkipRAG    bool
+	SkipMemory bool
 }
 
 // ─── Implementation ────────────────────────────────────────────────
@@ -110,26 +114,38 @@ func (b *builder) Build(ctx context.Context, params BuildParams) (*prompt.Sessio
 	ragCh := make(chan ragResult, 1)
 	memCh := make(chan memResult, 1)
 
-	go func() {
-		retStart := time.Now()
-		ctxInfo, err := b.ragRetrieve.Retrieve(ctx, params.RAGQuery, params.TargetDocID)
-		b.logger.Info().
-			Bool("has_results", ctxInfo.HasResults).
-			Int("context_len", len(ctxInfo.Context)).
-			Dur("ms", time.Since(retStart)).
-			Msg("[context] RAG retrieval done")
-		ragCh <- ragResult{ctx: ctxInfo, err: err}
-	}()
+	// RAG retrieval (skip if plan says not needed)
+	if params.SkipRAG {
+		b.logger.Debug().Msg("[context] skipping RAG per plan")
+		ragCh <- ragResult{ctx: rag.PromptContext{HasResults: false}, err: nil}
+	} else {
+		go func() {
+			retStart := time.Now()
+			ctxInfo, err := b.ragRetrieve.Retrieve(ctx, params.RAGQuery, params.TargetDocID)
+			b.logger.Info().
+				Bool("has_results", ctxInfo.HasResults).
+				Int("context_len", len(ctxInfo.Context)).
+				Dur("ms", time.Since(retStart)).
+				Msg("[context] RAG retrieval done")
+			ragCh <- ragResult{ctx: ctxInfo, err: err}
+		}()
+	}
 
-	go func() {
-		memStart := time.Now()
-		memCtx, err := b.memory.PrefetchRelevant(ctx, params.UserID, params.UserText)
-		b.logger.Info().
-			Int("memory_len", len(memCtx)).
-			Dur("ms", time.Since(memStart)).
-			Msg("[context] memory prefetch done")
-		memCh <- memResult{context: memCtx, err: err}
-	}()
+	// Memory prefetch (skip if plan says not needed)
+	if params.SkipMemory {
+		b.logger.Debug().Msg("[context] skipping memory per plan")
+		memCh <- memResult{context: "", err: nil}
+	} else {
+		go func() {
+			memStart := time.Now()
+			memCtx, err := b.memory.PrefetchRelevant(ctx, params.UserID, params.UserText)
+			b.logger.Info().
+				Int("memory_len", len(memCtx)).
+				Dur("ms", time.Since(memStart)).
+				Msg("[context] memory prefetch done")
+			memCh <- memResult{context: memCtx, err: err}
+		}()
+	}
 
 	ragRes := <-ragCh
 	memRes := <-memCh
