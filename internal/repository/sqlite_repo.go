@@ -81,6 +81,17 @@ type Repository interface {
 	GetLatestUserDocuments(ctx context.Context, userID string, limit int) ([]UserDocument, error)
 	GetUserDocumentByID(ctx context.Context, id string) (*UserDocument, error)
 
+	// ── New: conversation state ──
+	GetConversationState(ctx context.Context, userID, sessionID string) (*ConversationStateRow, error)
+	UpsertConversationState(ctx context.Context, arg UpsertConversationStateParams) error
+	IncrementTurnCount(ctx context.Context, userID, sessionID string) error
+
+	// ── New: user preferences ──
+	GetUserPreference(ctx context.Context, userID, prefKey string) (*UserPreferenceRow, error)
+	ListUserPreferences(ctx context.Context, userID string) ([]UserPreferenceRow, error)
+	UpsertUserPreference(ctx context.Context, arg UpsertUserPreferenceParams) error
+	DeleteUserPreference(ctx context.Context, userID, prefKey string) error
+
 	Close() error
 }
 
@@ -151,6 +162,51 @@ type InsertUserDocumentParams struct {
 	Title         string
 	Author        string
 	MetadataJSON  string
+}
+
+// ── Conversation State types ──
+
+type ConversationStateRow struct {
+	ID               int64
+	UserID           string
+	SessionID        string
+	StateJSON        string
+	LastIntent       string
+	LastMessageClass string
+	ActiveTask       string
+	TurnCount        int
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type UpsertConversationStateParams struct {
+	UserID           string
+	SessionID        string
+	StateJSON        string
+	LastIntent       string
+	LastMessageClass string
+	ActiveTask       string
+}
+
+// ── User Preference types ──
+
+type UserPreferenceRow struct {
+	ID         int64
+	UserID     string
+	PrefKey    string
+	PrefValue  string
+	Source     string
+	Confidence string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+type UpsertUserPreferenceParams struct {
+	UserID     string
+	PrefKey    string
+	PrefValue  string
+	Source     string // "explicit", "inferred", "default"
+	Confidence string // "high", "medium", "low"
 }
 
 // ─── Implementation ────────────────────────────────────────────────
@@ -642,4 +698,127 @@ func (r *sqliteRepo) GetUserDocumentByID(ctx context.Context, id string) (*UserD
 		return nil, err
 	}
 	return &d, nil
+}
+
+// ═════════════════════════════════════════════════════════════════
+// New: Conversation State
+// ═════════════════════════════════════════════════════════════════
+
+func (r *sqliteRepo) GetConversationState(ctx context.Context, userID, sessionID string) (*ConversationStateRow, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT id, user_id, session_id, state_json, last_intent, last_message_class, active_task, turn_count, created_at, updated_at
+		 FROM conversation_states
+		 WHERE user_id = ? AND session_id = ?`,
+		userID, sessionID,
+	)
+	var s ConversationStateRow
+	if err := row.Scan(
+		&s.ID, &s.UserID, &s.SessionID, &s.StateJSON,
+		&s.LastIntent, &s.LastMessageClass, &s.ActiveTask,
+		&s.TurnCount, &s.CreatedAt, &s.UpdatedAt,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &s, nil
+}
+
+func (r *sqliteRepo) UpsertConversationState(ctx context.Context, arg UpsertConversationStateParams) error {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO conversation_states (user_id, session_id, state_json, last_intent, last_message_class, active_task, turn_count)
+		 VALUES (?, ?, ?, ?, ?, ?, 1)
+		 ON CONFLICT(user_id, session_id) DO UPDATE SET
+			state_json = excluded.state_json,
+			last_intent = excluded.last_intent,
+			last_message_class = excluded.last_message_class,
+			active_task = excluded.active_task,
+			turn_count = conversation_states.turn_count + 1,
+			updated_at = CURRENT_TIMESTAMP`,
+		arg.UserID, arg.SessionID, arg.StateJSON, arg.LastIntent, arg.LastMessageClass, arg.ActiveTask,
+	)
+	return err
+}
+
+func (r *sqliteRepo) IncrementTurnCount(ctx context.Context, userID, sessionID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE conversation_states SET turn_count = turn_count + 1, updated_at = CURRENT_TIMESTAMP
+		 WHERE user_id = ? AND session_id = ?`,
+		userID, sessionID,
+	)
+	return err
+}
+
+// ═════════════════════════════════════════════════════════════════
+// New: User Preferences
+// ═════════════════════════════════════════════════════════════════
+
+func (r *sqliteRepo) GetUserPreference(ctx context.Context, userID, prefKey string) (*UserPreferenceRow, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT id, user_id, pref_key, pref_value, source, confidence, created_at, updated_at
+		 FROM user_preferences
+		 WHERE user_id = ? AND pref_key = ?`,
+		userID, prefKey,
+	)
+	var p UserPreferenceRow
+	if err := row.Scan(
+		&p.ID, &p.UserID, &p.PrefKey, &p.PrefValue,
+		&p.Source, &p.Confidence, &p.CreatedAt, &p.UpdatedAt,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &p, nil
+}
+
+func (r *sqliteRepo) ListUserPreferences(ctx context.Context, userID string) ([]UserPreferenceRow, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, user_id, pref_key, pref_value, source, confidence, created_at, updated_at
+		 FROM user_preferences
+		 WHERE user_id = ?
+		 ORDER BY pref_key`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []UserPreferenceRow
+	for rows.Next() {
+		var p UserPreferenceRow
+		if err := rows.Scan(
+			&p.ID, &p.UserID, &p.PrefKey, &p.PrefValue,
+			&p.Source, &p.Confidence, &p.CreatedAt, &p.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, p)
+	}
+	return results, rows.Err()
+}
+
+func (r *sqliteRepo) UpsertUserPreference(ctx context.Context, arg UpsertUserPreferenceParams) error {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO user_preferences (user_id, pref_key, pref_value, source, confidence)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(user_id, pref_key) DO UPDATE SET
+			pref_value = excluded.pref_value,
+			source = excluded.source,
+			confidence = excluded.confidence,
+			updated_at = CURRENT_TIMESTAMP`,
+		arg.UserID, arg.PrefKey, arg.PrefValue, arg.Source, arg.Confidence,
+	)
+	return err
+}
+
+func (r *sqliteRepo) DeleteUserPreference(ctx context.Context, userID, prefKey string) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM user_preferences WHERE user_id = ? AND pref_key = ?`,
+		userID, prefKey,
+	)
+	return err
 }

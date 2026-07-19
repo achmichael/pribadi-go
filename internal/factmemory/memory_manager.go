@@ -25,11 +25,23 @@ import (
 
 // ─── Interface ─────────────────────────────────────────────────────
 
+// ScoredFact represents a fact with confidence metadata.
+type ScoredFact struct {
+	FactText   string  `json:"fact_text"`
+	Category   string  `json:"category"`
+	Score      float32 `json:"score"`
+	Confidence string  `json:"confidence"` // "high", "medium", "low"
+}
+
 // MemoryManager is the top-level interface consumed by the orchestrator.
 type MemoryManager interface {
 	// PrefetchRelevant returns a formatted context block of relevant facts
 	// for the given user+message, ready to inject into system prompt.
 	PrefetchRelevant(ctx context.Context, userID string, currentMessage string) (string, error)
+
+	// PrefetchWithScores returns scored facts with confidence levels.
+	// Used by the intelligence layer for confidence-aware retrieval (Principle 6).
+	PrefetchWithScores(ctx context.Context, userID string, currentMessage string) ([]ScoredFact, error)
 
 	// SyncAsync fires a background goroutine to extract facts from the
 	// latest conversation turn and store them. Non-blocking.
@@ -202,6 +214,93 @@ func (m *manager) PrefetchRelevant(ctx context.Context, userID string, currentMe
 		Msg("[factmemory] prefetch done")
 
 	return sb.String(), nil
+}
+
+// PrefetchWithScores returns scored facts with confidence metadata.
+func (m *manager) PrefetchWithScores(ctx context.Context, userID string, currentMessage string) ([]ScoredFact, error) {
+	start := time.Now()
+
+	embedding, err := m.embedder.Embed(ctx, currentMessage)
+	if err != nil {
+		return nil, fmt.Errorf("embed query: %w", err)
+	}
+
+	limit := uint64(prefetchTopK)
+	withPayload := true
+
+	resp, err := m.points.Search(ctx, &pb.SearchPoints{
+		CollectionName: collectionName,
+		Vector:         embedding,
+		Limit:          limit,
+		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: withPayload}},
+		Filter: &pb.Filter{
+			Must: []*pb.Condition{
+				{
+					ConditionOneOf: &pb.Condition_Field{
+						Field: &pb.FieldCondition{
+							Key: "user_id",
+							Match: &pb.Match{
+								MatchValue: &pb.Match_Keyword{Keyword: userID},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search user_facts: %w", err)
+	}
+
+	results := resp.GetResult()
+	if len(results) == 0 {
+		return nil, nil
+	}
+
+	var scored []ScoredFact
+	for _, r := range results {
+		factText := ""
+		category := ""
+		for k, v := range r.GetPayload() {
+			switch k {
+			case "fact_text":
+				factText = v.GetStringValue()
+			case "category":
+				category = v.GetStringValue()
+			}
+		}
+		if factText == "" {
+			continue
+		}
+
+		confidence := scoreToConfidence(r.GetScore())
+		scored = append(scored, ScoredFact{
+			FactText:   factText,
+			Category:   category,
+			Score:      r.GetScore(),
+			Confidence: confidence,
+		})
+	}
+
+	m.logger.Info().
+		Str("user_id", userID).
+		Int("facts_found", len(scored)).
+		Dur("ms", time.Since(start)).
+		Msg("[factmemory] prefetch with scores done")
+
+	return scored, nil
+}
+
+// scoreToConfidence maps vector similarity score to confidence level.
+func scoreToConfidence(score float32) string {
+	switch {
+	case score >= 0.75:
+		return "high"
+	case score >= 0.50:
+		return "medium"
+	default:
+		return "low"
+	}
 }
 
 // ─── Sync (async) ──────────────────────────────────────────────────
