@@ -208,6 +208,8 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 			if len(extractText) > 2000 {
 				extractText = extractText[:2000]
 			}
+			// Normalisasi spasi dan newline agar LLM tidak bingung dengan format OCR
+			extractText = strings.Join(strings.Fields(extractText), " ")
 
 			metaPrompt := `ANDA ADALAH: DOCUMENT METADATA EXTRACTION AGENT
 
@@ -220,6 +222,7 @@ ATURAN WAJIB UNTUK MENENTUKAN "TITLE" (JUDUL):
 3. Judul asli biasanya merupakan frasa nominal yang menjelaskan topik penelitian (metode, subjek, objek penelitian) — bukan kalimat administratif jurnal.
 4. WAJIB lakukan cross-check internal sebelum finalisasi: setelah Anda mengekstrak "Title" dan "Abstract"/"Keywords", PERIKSA apakah keduanya secara tematik konsisten satu sama lain. Jika "Title" yang Anda temukan TIDAK relevan secara tema dengan "Abstract" atau "Keywords" yang Anda temukan di teks yang sama, maka "Title" tersebut SALAH — cari ulang kandidat judul lain di teks, atau jika benar-benar tidak ditemukan, kembalikan string kosong daripada memaksakan judul yang tidak konsisten.
 5. Jika dalam satu potongan teks Anda menemukan LEBIH DARI SATU kandidat judul (misalnya satu di bagian atas sebagai header, satu lagi tepat sebelum nama penulis), PILIH yang posisinya TEPAT SEBELUM/BERDEKATAN dengan daftar nama penulis.
+6. EKSTRAK SECARA VERBATIM (SAMA PERSIS): Salin teks judul asli kata demi kata. JANGAN PERNAH meringkas, menghilangkan kata, atau memodifikasi judul asli menjadi bentuk lain (contoh: teks asli yang panjang TIDAK BOLEH disingkat menjadi lebih pendek).
 
 FORMAT OUTPUT:
 Jawab HANYA dalam format JSON murni, tanpa markdown, tanpa basa-basi, tanpa penjelasan tambahan. Jika sebuah field tidak ditemukan dalam teks, isi dengan string kosong "" — JANGAN mengisi dengan tebakan atau placeholder.
@@ -464,8 +467,21 @@ Metadata dokumen aktif (JSON): %s`, userText, doc.MetadataJSON)
 
 	messages := []ollama.ChatMessage{
 		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userMsgContent},
 	}
+
+	// ── 3.5 Inject Short-Term Conversation History ────────────────────
+	if historyMsgs, err := o.repo.ListMessagesByUserSession(ctx, userID, sessionID, 10); err == nil {
+		for _, m := range historyMsgs {
+			messages = append(messages, ollama.ChatMessage{
+				Role:    m.Role,
+				Content: m.Content,
+			})
+		}
+	} else {
+		o.logger.Warn().Err(err).Msg("[orchestrator] failed to fetch conversation history for LLM prompt")
+	}
+
+	messages = append(messages, ollama.ChatMessage{Role: "user", Content: userMsgContent})
 
 	o.logger.Info().
 		Str("msg_id", msg.ID).
@@ -558,6 +574,12 @@ func (o *orchestrator) buildSystemPrompt(ctx context.Context, ctxInfo rag.Prompt
 	if targetDocID != "" && metadataBlock != "" {
 		var sb strings.Builder
 		sb.WriteString(fmt.Sprintf("ANDA ADALAH: %s\n%s\nGaya Bahasa: %s\n\n", personaName, personaDesc, tonePref))
+
+		if memoryContext != "" {
+			sb.WriteString(memoryContext)
+			sb.WriteString("\n\n")
+		}
+
 		sb.WriteString("ATURAN ISOLASI KONTEKS DOKUMEN (WAJIB DIPATUHI):\n")
 		sb.WriteString("1. Dokumen yang SEDANG AKTIF dan menjadi rujukan tunggal untuk pertanyaan pengguna saat ini adalah dokumen dengan metadata berikut:\n")
 		sb.WriteString(metadataBlock)
@@ -586,13 +608,13 @@ func (o *orchestrator) buildSystemPrompt(ctx context.Context, ctxInfo rag.Prompt
 	sysPrompt = strings.ReplaceAll(sysPrompt, "{{persona_name}}", personaName)
 	sysPrompt = strings.ReplaceAll(sysPrompt, "{{persona_description}}", personaDesc)
 	sysPrompt = strings.ReplaceAll(sysPrompt, "{{tone_preference}}", tonePref)
-	
+
 	if memoryContext != "" {
 		sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", memoryContext)
 	} else {
 		sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", "(Tidak ada fakta relevan)")
 	}
-	
+
 	sysPrompt = strings.ReplaceAll(sysPrompt, "{{active_document_metadata}}", "(Tidak ada dokumen aktif)")
 
 	if ctxInfo.HasResults {

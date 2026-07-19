@@ -450,10 +450,14 @@ func (r *sqliteRepo) InsertMessageV2(ctx context.Context, arg InsertMessageV2Par
 func (r *sqliteRepo) ListMessagesByUserSession(ctx context.Context, userID, sessionID string, limit int) ([]MessageV2, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, user_id, platform, platform_msg_id, session_id, role, content, token_count, created_at
-		 FROM messages_v2
-		 WHERE user_id = ? AND session_id = ?
-		 ORDER BY created_at ASC
-		 LIMIT ?`,
+		 FROM (
+			 SELECT id, user_id, platform, platform_msg_id, session_id, role, content, token_count, created_at
+			 FROM messages_v2
+			 WHERE user_id = ? AND session_id = ?
+			 ORDER BY created_at DESC
+			 LIMIT ?
+		 ) sub
+		 ORDER BY created_at ASC`,
 		userID, sessionID, limit,
 	)
 	if err != nil {
