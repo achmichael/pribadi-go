@@ -221,24 +221,6 @@ func (c *composer) enhanceWithPlan(sysPrompt string, plan *planner.Plan) string 
 	return sysPrompt
 }
 
-// buildUserPrompt constructs the user prompt with optional history.
 func (c *composer) buildUserPrompt(params ComposeParams) string {
-	if len(params.ConversationHistory) == 0 {
-		return params.UserText
-	}
-	
-	// Include recent history for context
-	var sb strings.Builder
-	sb.WriteString("=== Recent Conversation History ===\n")
-	for _, msg := range params.ConversationHistory {
-		role := "User"
-		if msg.Role == "assistant" {
-			role = "Assistant"
-		}
-		sb.WriteString(fmt.Sprintf("[%s]: %s\n\n", role, msg.Content))
-	}
-	sb.WriteString("=== Current User Message ===\n")
-	sb.WriteString(params.UserText)
-	
-	return sb.String()
+	return params.UserText
 }

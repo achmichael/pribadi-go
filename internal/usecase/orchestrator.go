@@ -7,10 +7,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/achmichael/pribadi-go/internal/classifier"
+	contextpkg "github.com/achmichael/pribadi-go/internal/context"
+	"github.com/achmichael/pribadi-go/internal/conversation"
 	"github.com/achmichael/pribadi-go/internal/delivery/whatsapp"
+	"github.com/achmichael/pribadi-go/internal/domain"
 	"github.com/achmichael/pribadi-go/internal/factmemory"
 	"github.com/achmichael/pribadi-go/internal/identity"
+	"github.com/achmichael/pribadi-go/internal/planner"
+	"github.com/achmichael/pribadi-go/internal/prompt"
+	"github.com/achmichael/pribadi-go/internal/reasoning"
 	"github.com/achmichael/pribadi-go/internal/repository"
+	"github.com/achmichael/pribadi-go/internal/response"
 	"github.com/achmichael/pribadi-go/internal/usecase/rag"
 	"github.com/achmichael/pribadi-go/pkg/ollama"
 	"github.com/google/uuid"
@@ -33,7 +41,21 @@ type orchestrator struct {
 	memory        factmemory.MemoryManager
 	resolver      *identity.Resolver
 	refResolver   ReferenceResolver
-	logger        *zerolog.Logger
+
+	stateManager      conversation.StateManager
+	prefManager       conversation.PreferenceManager
+	intentClassifier  classifier.IntentClassifier
+	taskClassifier    classifier.TaskClassifier
+	interceptor       classifier.Interceptor
+	planner           planner.Planner
+	contextBuilder    contextpkg.Builder
+	promptBuilder     *prompt.Builder
+	promptComposer    prompt.Composer
+	verifier          reasoning.Verifier
+	reflector         reasoning.Reflector
+	responseProcessor response.Processor
+	interactionLogger response.InteractionLogger
+	logger            *zerolog.Logger
 }
 
 // DocMeta represents structured metadata extracted from documents
@@ -62,21 +84,47 @@ func NewOrchestrator(
 	memory factmemory.MemoryManager,
 	resolver *identity.Resolver,
 	refResolver ReferenceResolver,
+	stateManager conversation.StateManager,
+	prefManager conversation.PreferenceManager,
+	intentClassifier classifier.IntentClassifier,
+	taskClassifier classifier.TaskClassifier,
+	interceptor classifier.Interceptor,
+	planner planner.Planner,
+	contextBuilder contextpkg.Builder,
+	promptBuilder *prompt.Builder,
+	promptComposer prompt.Composer,
+	verifier reasoning.Verifier,
+	reflector reasoning.Reflector,
+	responseProcessor response.Processor,
+	interactionLogger response.InteractionLogger,
 	logger *zerolog.Logger,
 ) Orchestrator {
 	return &orchestrator{
-		waClient:      waClient,
-		transcription: transcription,
-		extraction:    extraction,
-		ragIngest:     ragIngest,
-		ragRetrieve:   ragRetrieve,
-		ollama:        ollamaClient,
-		repo:          repo,
-		dashboardRepo: dashboardRepo,
-		memory:        memory,
-		resolver:      resolver,
-		refResolver:   refResolver,
-		logger:        logger,
+		waClient:          waClient,
+		transcription:     transcription,
+		extraction:        extraction,
+		ragIngest:         ragIngest,
+		ragRetrieve:       ragRetrieve,
+		ollama:            ollamaClient,
+		repo:              repo,
+		dashboardRepo:     dashboardRepo,
+		memory:            memory,
+		resolver:          resolver,
+		refResolver:       refResolver,
+		stateManager:      stateManager,
+		prefManager:       prefManager,
+		intentClassifier:  intentClassifier,
+		taskClassifier:    taskClassifier,
+		interceptor:       interceptor,
+		planner:           planner,
+		contextBuilder:    contextBuilder,
+		promptBuilder:     promptBuilder,
+		promptComposer:    promptComposer,
+		verifier:          verifier,
+		reflector:         reflector,
+		responseProcessor: responseProcessor,
+		interactionLogger: interactionLogger,
+		logger:            logger,
 	}
 }
 
@@ -344,33 +392,32 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 		Dur("preprocess_ms", time.Since(handleStart)).
 		Msg("[orchestrator] preprocessing complete, starting retrieval + memory")
 
-	sessionID := "default"
+	sessionID := "default" // TODO: multi-session
 
-	// ── 1.5 Reference Resolution ────────────────────────────────────
+	// Load Session State
+	state, err := o.stateManager.Load(ctx, userID, sessionID)
+	if err != nil {
+		o.logger.Warn().Err(err).Msg("[orchestrator] state load failed, continuing with empty state")
+	}
+	var stateData *domain.StateData
+	var rawState *repository.ConversationStateRow
+	var turnCount int
+	if state != nil {
+		stateData = state
+		if raw, _ := o.stateManager.GetRaw(ctx, userID, sessionID); raw != nil {
+			rawState = raw
+			turnCount = raw.TurnCount
+		}
+	}
+
+	// ── 2. Reference Resolution (Extract Context Needs) ─────────────
 	ragQuery := userText
 	targetDocID := ""
-	metadataBlock := ""
 	if msg.MessageType == whatsapp.MessageTypeText || msg.MessageType == whatsapp.MessageTypeVoiceNote {
 		ragQuery, targetDocID = o.refResolver.ResolveQuery(ctx, userID, userText, sessionID)
 		if targetDocID != "" {
 			doc, err := o.repo.GetUserDocumentByID(ctx, targetDocID)
 			if err == nil && doc != nil {
-				metadataJSON := doc.MetadataJSON
-				if metadataJSON == "" || metadataJSON == "{}" {
-					basicMeta := map[string]string{
-						"title":  doc.Title,
-						"author": doc.Author,
-					}
-					bBytes, _ := json.Marshal(basicMeta)
-					metadataJSON = string(bBytes)
-				}
-
-				var b strings.Builder
-				b.WriteString(fmt.Sprintf("--- DOCUMENT METADATA (AKTIF: document_id=%s) ---\n", doc.ID))
-				b.WriteString(metadataJSON)
-				b.WriteString("\n--- END METADATA ---\n")
-				metadataBlock = b.String()
-
 				// --- Query Contextualization Agent ---
 				if doc.MetadataJSON != "" && doc.MetadataJSON != "{}" {
 					contextualizePrompt := fmt.Sprintf(`ANDA ADALAH: QUERY CONTEXTUALIZATION AGENT untuk sistem RAG multilingual.
@@ -405,119 +452,185 @@ Metadata dokumen aktif (JSON): %s`, userText, doc.MetadataJSON)
 		}
 	}
 
-	// ── 2. Retrieval (RAG docs + fact memory in parallel) ──────────
-	type ragResult struct {
-		ctx rag.PromptContext
-		err error
-	}
-	type memResult struct {
-		context string
-		err     error
-	}
-
-	ragCh := make(chan ragResult, 1)
-	memCh := make(chan memResult, 1)
-
-	go func() {
-		retStart := time.Now()
-		ctxInfo, err := o.ragRetrieve.Retrieve(ctx, ragQuery, targetDocID)
-		o.logger.Info().
-			Str("msg_id", msg.ID).
-			Bool("has_results", ctxInfo.HasResults).
-			Int("context_len", len(ctxInfo.Context)).
-			Dur("ms", time.Since(retStart)).
-			Msg("[orchestrator] RAG retrieval done")
-		ragCh <- ragResult{ctx: ctxInfo, err: err}
-	}()
-
-	go func() {
-		memStart := time.Now()
-		memCtx, err := o.memory.PrefetchRelevant(ctx, userID, userText)
-		o.logger.Info().
-			Str("msg_id", msg.ID).
-			Int("memory_len", len(memCtx)).
-			Dur("ms", time.Since(memStart)).
-			Msg("[orchestrator] memory prefetch done")
-		memCh <- memResult{context: memCtx, err: err}
-	}()
-
-	ragRes := <-ragCh
-	memRes := <-memCh
-
-	ctxInfo := ragRes.ctx
-	if ragRes.err != nil {
-		o.logger.Warn().Err(ragRes.err).Msg("[orchestrator] RAG retrieval failed")
-		ctxInfo = rag.PromptContext{HasResults: false}
+	// ── 3. Classification (Phase 2) ─────────────────────────────────
+	var classResult *classifier.Classification
+	var activeTask string
+	var lastIntent string
+	var lastClass string
+	if rawState != nil {
+		activeTask = rawState.ActiveTask
+		lastIntent = rawState.LastIntent
+		lastClass = rawState.LastMessageClass
 	}
 
-	memoryContext := ""
-	if memRes.err != nil {
-		o.logger.Warn().Err(memRes.err).Msg("[orchestrator] memory prefetch failed")
-	} else {
-		memoryContext = memRes.context
+	intentRes, err := o.intentClassifier.Classify(ctx, classifier.ClassifyParams{
+		UserText:     userText,
+		LastIntent:   lastIntent,
+		LastClass:    lastClass,
+		ActiveTask:   activeTask,
+		TurnCount:    turnCount,
+		HasActiveDoc: targetDocID != "",
+	})
+	if err == nil {
+		classResult = intentRes
 	}
 
-	// ── 3. LLM Generation ─────────────────────────────────────────────
-	systemPrompt := o.buildSystemPrompt(ctx, ctxInfo, memoryContext, metadataBlock, targetDocID)
-
-	userMsgContent := userText
-	if targetDocID != "" {
-		userMsgContent = "PERTANYAAN PENGGUNA:\n" + userText
+	taskRes, _ := o.taskClassifier.Classify(ctx, classifier.TaskClassifyParams{
+		UserText:   userText,
+		ActiveTask: activeTask,
+		LastIntent: lastIntent,
+		SessionID:  sessionID,
+		UserID:     userID,
+		TurnCount:  turnCount,
+	})
+	if classResult != nil && taskRes != nil {
+		classResult.ContinuesPrevious = taskRes.ContinuesTask
 	}
 
-	messages := []ollama.ChatMessage{
-		{Role: "system", Content: systemPrompt},
+	// ── 4. Interceptor (Phase 2) ────────────────────────────────────
+	if classResult != nil {
+		intercepted, ackMsg, err := o.interceptor.Process(ctx, classifier.InterceptParams{
+			UserID:    userID,
+			SessionID: sessionID,
+			UserText:  userText,
+			Class:     classResult,
+			State:     stateData,
+		})
+		if err != nil {
+			o.logger.Warn().Err(err).Msg("[orchestrator] interceptor error")
+		}
+		if intercepted {
+			o.logger.Info().Str("msg_id", msg.ID).Msg("[orchestrator] request intercepted (e.g. preference update)")
+			sendErr := o.waClient.SendText(ctx, msg.SenderJID, ackMsg)
+			// Trigger state update anyway for the preference set
+			o.responseProcessor.UpdateState(ctx, userID, sessionID, classResult)
+			return sendErr
+		}
 	}
 
-	// ── 3.5 Inject Short-Term Conversation History ────────────────────
+	// ── 5. Planner (Phase 2) ────────────────────────────────────────
+	plan, err := o.planner.CreatePlan(ctx, planner.PlanParams{
+		UserText:       userText,
+		Classification: classResult,
+		State:          stateData,
+		HasActiveDoc:   targetDocID != "",
+		TurnCount:      turnCount,
+	})
+	if err != nil {
+		o.logger.Warn().Err(err).Msg("[orchestrator] planning failed, fallback to defaults")
+	}
+
+	// ── 6. Context Builder & Prompt Composer (Phase 3) ──────────────
+	sc, err := o.contextBuilder.Build(ctx, contextpkg.BuildParams{
+		UserID:       userID,
+		SessionID:    sessionID,
+		UserText:     userText,
+		RAGQuery:     ragQuery,
+		TargetDocID:  targetDocID,
+		HistoryLimit: 10,
+		SkipRAG:      plan != nil && !plan.NeedsRAG,
+		SkipMemory:   plan != nil && !plan.NeedsMemory,
+	})
+	if err != nil {
+		return fmt.Errorf("context builder: %w", err)
+	}
+
+	var convHistory []prompt.HistoryMessage
 	if historyMsgs, err := o.repo.ListMessagesByUserSession(ctx, userID, sessionID, 10); err == nil {
 		for _, m := range historyMsgs {
-			messages = append(messages, ollama.ChatMessage{
+			convHistory = append(convHistory, prompt.HistoryMessage{
 				Role:    m.Role,
 				Content: m.Content,
 			})
 		}
-	} else {
-		o.logger.Warn().Err(err).Msg("[orchestrator] failed to fetch conversation history for LLM prompt")
 	}
 
-	messages = append(messages, ollama.ChatMessage{Role: "user", Content: userMsgContent})
+	composed, err := o.promptComposer.Compose(ctx, prompt.ComposeParams{
+		UserText:            userText,
+		Classification:      classResult,
+		Plan:                plan,
+		SessionContext:      sc,
+		ConversationHistory: convHistory,
+	})
+	if err != nil {
+		return fmt.Errorf("prompt composer: %w", err)
+	}
+
+	// ── 7. LLM Generation ───────────────────────────────────────────
+	messages := []ollama.ChatMessage{
+		{Role: "system", Content: composed.SystemPrompt},
+	}
+	
+	for _, histMsg := range convHistory {
+		messages = append(messages, ollama.ChatMessage{
+			Role:    histMsg.Role,
+			Content: histMsg.Content,
+		})
+	}
+	
+	messages = append(messages, ollama.ChatMessage{
+		Role:    "user",
+		Content: composed.UserPrompt,
+	})
 
 	o.logger.Info().
 		Str("msg_id", msg.ID).
-		Int("system_prompt_len", len(systemPrompt)).
-		Int("user_text_len", len(userText)).
+		Int("sys_len", len(composed.SystemPrompt)).
+		Int("user_len", len(composed.UserPrompt)).
 		Msg("[orchestrator] sending to Ollama")
 
 	llmStart := time.Now()
-	reply, err := o.ollama.Chat(ctx, messages)
+	rawResponse, err := o.ollama.Chat(ctx, messages)
 	llmDur := time.Since(llmStart)
 	if err != nil {
-		o.logger.Error().Err(err).
-			Str("msg_id", msg.ID).
-			Dur("duration_ms", llmDur).
-			Msg("[orchestrator] Ollama chat FAILED")
+		o.logger.Error().Err(err).Dur("ms", llmDur).Msg("[orchestrator] Ollama generation failed")
+		
+		// Log error
+		o.interactionLogger.LogError(ctx, userID, sessionID, userText, err.Error(), time.Since(handleStart).Milliseconds())
 		return err
 	}
-	o.logger.Info().
-		Str("msg_id", msg.ID).
-		Int("reply_len", len(reply)).
-		Dur("duration_ms", llmDur).
-		Msg("[orchestrator] Ollama chat done")
 
-	// ── 4. Send reply ─────────────────────────────────────────────────
-	sendStart := time.Now()
-	err = o.waClient.SendText(ctx, msg.SenderJID, reply)
-	o.logger.Info().
-		Str("msg_id", msg.ID).
-		Dur("send_ms", time.Since(sendStart)).
-		Dur("total_ms", time.Since(handleStart)).
-		Msg("[orchestrator] handle complete")
+	// ── 8. Verifier (Phase 4) ───────────────────────────────────────
+	verification, _ := o.verifier.Verify(ctx, reasoning.VerifyParams{
+		UserID:       userID,
+		SessionID:    sessionID,
+		UserQuestion: userText,
+		Response:     rawResponse,
+		State:        stateData,
+		RAGContext:   sc.RAGContext,
+		RAGSources:   sc.RAGSources,
+	})
 
-	// ── 5. Async: persist conversation + extract facts ────────────────
-	// Store messages in messages_v2
-	sessionID = "default" // TODO: session rotation based on idle time
-	o.repo.InsertMessageV2(ctx, repository.InsertMessageV2Params{
+	// ── 9. Response Processor (Phase 5) ─────────────────────────────
+	finalRes, err := o.responseProcessor.Process(ctx, response.ProcessParams{
+		UserID:         userID,
+		SessionID:      sessionID,
+		UserMessage:    userText,
+		RawResponse:    rawResponse,
+		Classification: classResult,
+		Plan:           plan,
+		ComposedPrompt: composed,
+		Verification:   verification,
+		RAGSources:     sc.RAGSources,
+		State:          stateData,
+	})
+	if err != nil {
+		return fmt.Errorf("response processor: %w", err)
+	}
+
+	// Populate durations in metadata
+	finalRes.Metadata.TotalDurationMs = time.Since(handleStart).Milliseconds()
+	finalRes.Metadata.LLMInferenceMs = llmDur.Milliseconds()
+
+	// ── 10. Send Reply ──────────────────────────────────────────────
+	sendErr := o.waClient.SendText(ctx, msg.SenderJID, finalRes.Text)
+
+	// ── 11. Async Post-processing ───────────────────────────────────
+	// Note: We use background context for async work to not be cancelled if request context ends
+	bgCtx := context.Background()
+	
+	// 1. Persist Raw Messages
+	o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
 		UserID:        userID,
 		Platform:      "whatsapp",
 		PlatformMsgID: msg.ID,
@@ -526,19 +639,69 @@ Metadata dokumen aktif (JSON): %s`, userText, doc.MetadataJSON)
 		Content:       userText,
 		TokenCount:    estimateTokens(userText),
 	})
-	o.repo.InsertMessageV2(ctx, repository.InsertMessageV2Params{
+	o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
 		UserID:     userID,
 		Platform:   "whatsapp",
 		SessionID:  sessionID,
 		Role:       "assistant",
-		Content:    reply,
-		TokenCount: estimateTokens(reply),
+		Content:    finalRes.Text,
+		TokenCount: estimateTokens(finalRes.Text),
 	})
 
-	// Fire async fact extraction
-	o.memory.SyncAsync(userID, userText, reply)
+	// 2. Update State
+	if finalRes.ShouldUpdate {
+		o.responseProcessor.UpdateState(bgCtx, userID, sessionID, classResult)
+	}
 
-	return err
+	// 3. Trigger Memory Sync
+	if finalRes.ShouldUpdate {
+		o.responseProcessor.TriggerMemorySync(userID, userText, finalRes.Text)
+	}
+
+	// 4. Reflector & Logging
+	go func() {
+		// Reflect
+		reflection, _ := o.reflector.Reflect(bgCtx, reasoning.ReflectionParams{
+			UserQuestion: userText,
+			Response:     finalRes.Text,
+			Plan:         fmt.Sprintf("%+v", plan),
+			RAGUsed:      finalRes.Metadata.RAGUsed,
+			MemoryUsed:   finalRes.Metadata.MemoryUsed,
+			HistoryUsed:  finalRes.Metadata.HistoryUsed,
+		})
+		finalRes.Metadata.Reflection = reflection
+
+		// Convert metadata to map[string]interface{}
+		metaMap := map[string]interface{}{
+			"llm_ms": finalRes.Metadata.LLMInferenceMs,
+		}
+		if classResult != nil {
+			metaMap["intent"] = classResult.Intent
+			metaMap["class"] = classResult.MessageClass
+		}
+		if plan != nil {
+			metaMap["strategy"] = plan.ResponseStrategy
+		}
+		if verification != nil {
+			metaMap["confidence_score"] = verification.ConfidenceScore
+			metaMap["hallucination_risk"] = verification.HallucinationRisk
+			metaMap["is_valid"] = verification.IsValid
+		}
+
+		// Log Interaction
+		o.interactionLogger.Log(bgCtx, response.InteractionLog{
+			UserID:      userID,
+			SessionID:   sessionID,
+			Timestamp:   time.Now(),
+			UserMessage: userText,
+			Response:    finalRes.Text,
+			Metadata:    metaMap,
+			Duration:    finalRes.Metadata.TotalDurationMs,
+			Success:     sendErr == nil,
+		})
+	}()
+
+	return sendErr
 }
 
 // estimateTokens rough word-based token count.
@@ -550,85 +713,3 @@ func estimateTokens(s string) int {
 	return int(float64(words) * 1.3)
 }
 
-// buildSystemPrompt constructs system prompt with bounded RAG context + memory.
-func (o *orchestrator) buildSystemPrompt(ctx context.Context, ctxInfo rag.PromptContext, memoryContext, metadataBlock string, targetDocID string) string {
-	// Fetch dynamic configuration from Dashboard
-	personaName := "Assistant"
-	personaDesc := "Saya adalah asisten AI yang cerdas dan efisien."
-	tonePref := "formal"
-	promptTemplate := "Anda adalah asisten AI. Identitas Anda: {{persona_name}} ({{persona_description}}). Gaya bahasa: {{tone_preference}}.\n\nFakta: {{user_facts}}\nDokumen: {{active_document_metadata}}\nRAG Context: {{rag_context}}"
-
-	if conf, err := o.dashboardRepo.GetAgentConfigByKey(ctx, "persona_name"); err == nil && conf != nil {
-		json.Unmarshal([]byte(conf.ValueJSON), &personaName)
-	}
-	if conf, err := o.dashboardRepo.GetAgentConfigByKey(ctx, "persona_description"); err == nil && conf != nil {
-		json.Unmarshal([]byte(conf.ValueJSON), &personaDesc)
-	}
-	if conf, err := o.dashboardRepo.GetAgentConfigByKey(ctx, "tone_preference"); err == nil && conf != nil {
-		json.Unmarshal([]byte(conf.ValueJSON), &tonePref)
-	}
-	if conf, err := o.dashboardRepo.GetAgentConfigByKey(ctx, "system_prompt_template"); err == nil && conf != nil {
-		json.Unmarshal([]byte(conf.ValueJSON), &promptTemplate)
-	}
-
-	if targetDocID != "" && metadataBlock != "" {
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("ANDA ADALAH: %s\n%s\nGaya Bahasa: %s\n\n", personaName, personaDesc, tonePref))
-
-		if memoryContext != "" {
-			sb.WriteString(memoryContext)
-			sb.WriteString("\n\n")
-		}
-
-		sb.WriteString("ATURAN ISOLASI KONTEKS DOKUMEN (WAJIB DIPATUHI):\n")
-		sb.WriteString("1. Dokumen yang SEDANG AKTIF dan menjadi rujukan tunggal untuk pertanyaan pengguna saat ini adalah dokumen dengan metadata berikut:\n")
-		sb.WriteString(metadataBlock)
-		sb.WriteString("\n")
-		sb.WriteString("2. Potongan teks (chunks) yang diberikan ke Anda di bawah ini HANYA berasal dari dokumen aktif tersebut. Jika ada potongan teks yang isinya tampak tidak konsisten dengan metadata di atas, abaikan potongan tersebut dan jangan gunakan sebagai dasar jawaban.\n\n")
-		sb.WriteString("3. JANGAN PERNAH mencampur, menggabungkan, atau membandingkan informasi dari dokumen ini dengan dokumen lain yang mungkin pernah dibahas SEBELUMNYA dalam riwayat percakapan ini, KECUALI pengguna secara eksplisit memerintahkan perbandingan.\n\n")
-		sb.WriteString(fmt.Sprintf("4. Jika dalam riwayat percakapan terdapat pembahasan tentang dokumen lain (document_id berbeda dari %s), perlakukan pembahasan tersebut sebagai TIDAK RELEVAN untuk menjawab pertanyaan saat ini. Fokus jawaban Anda HARUS 100%% bersumber dari metadata dan chunk dokumen aktif saja.\n\n", targetDocID))
-		sb.WriteString("5. Sebelum menjawab, lakukan VERIFIKASI INTERNAL: pastikan setiap metode, hasil, atau istilah teknis yang Anda sebutkan dalam jawaban benar-benar muncul dalam chunk/metadata dokumen aktif ini.\n\n")
-
-		sb.WriteString("KONTEN UNTUK DIJAWAB:\n")
-		if ctxInfo.HasResults {
-			ragCtx := ctxInfo.Context
-			if len(ragCtx) > maxContextChars {
-				ragCtx = ragCtx[:maxContextChars] + "\n[...context truncated...]"
-			}
-			sb.WriteString(ragCtx)
-		} else {
-			sb.WriteString("(Tidak ada chunk yang ditemukan)")
-		}
-
-		return sb.String()
-	}
-
-	// Normal dynamic prompt
-	sysPrompt := promptTemplate
-	sysPrompt = strings.ReplaceAll(sysPrompt, "{{persona_name}}", personaName)
-	sysPrompt = strings.ReplaceAll(sysPrompt, "{{persona_description}}", personaDesc)
-	sysPrompt = strings.ReplaceAll(sysPrompt, "{{tone_preference}}", tonePref)
-
-	if memoryContext != "" {
-		sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", memoryContext)
-	} else {
-		sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", "(Tidak ada fakta relevan)")
-	}
-
-	sysPrompt = strings.ReplaceAll(sysPrompt, "{{active_document_metadata}}", "(Tidak ada dokumen aktif)")
-
-	if ctxInfo.HasResults {
-		ragCtx := ctxInfo.Context
-		if len(ragCtx) > maxContextChars {
-			ragCtx = ragCtx[:maxContextChars] + "\n[...context truncated...]"
-		}
-		sysPrompt = strings.ReplaceAll(sysPrompt, "{{rag_context}}", ragCtx)
-		if len(ctxInfo.Sources) > 0 {
-			sysPrompt += "\n\nSources: " + strings.Join(ctxInfo.Sources, ", ")
-		}
-	} else {
-		sysPrompt = strings.ReplaceAll(sysPrompt, "{{rag_context}}", "")
-	}
-
-	return sysPrompt
-}

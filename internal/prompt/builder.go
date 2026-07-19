@@ -165,14 +165,13 @@ func (b *Builder) buildDocumentIsolatedPrompt(sc SessionContext) string {
 		sb.WriteString("\n\n")
 	}
 
-	sb.WriteString("ATURAN ISOLASI KONTEKS DOKUMEN (WAJIB DIPATUHI):\n")
-	sb.WriteString("1. Dokumen yang SEDANG AKTIF dan menjadi rujukan tunggal untuk pertanyaan pengguna saat ini adalah dokumen dengan metadata berikut:\n")
+	sb.WriteString("ATURAN PENGGUNAAN KONTEKS DOKUMEN:\n")
+	sb.WriteString("1. Dokumen yang SEDANG AKTIF adalah dokumen dengan metadata berikut:\n")
 	sb.WriteString(sc.MetadataBlock)
 	sb.WriteString("\n")
-	sb.WriteString("2. Potongan teks (chunks) yang diberikan ke Anda di bawah ini HANYA berasal dari dokumen aktif tersebut. Jika ada potongan teks yang isinya tampak tidak konsisten dengan metadata di atas, abaikan potongan tersebut dan jangan gunakan sebagai dasar jawaban.\n\n")
-	sb.WriteString("3. JANGAN PERNAH mencampur, menggabungkan, atau membandingkan informasi dari dokumen ini dengan dokumen lain yang mungkin pernah dibahas SEBELUMNYA dalam riwayat percakapan ini, KECUALI pengguna secara eksplisit memerintahkan perbandingan.\n\n")
-	sb.WriteString(fmt.Sprintf("4. Jika dalam riwayat percakapan terdapat pembahasan tentang dokumen lain (document_id berbeda dari %s), perlakukan pembahasan tersebut sebagai TIDAK RELEVAN untuk menjawab pertanyaan saat ini. Fokus jawaban Anda HARUS 100%% bersumber dari metadata dan chunk dokumen aktif saja.\n\n", sc.TargetDocID))
-	sb.WriteString("5. Sebelum menjawab, lakukan VERIFIKASI INTERNAL: pastikan setiap metode, hasil, atau istilah teknis yang Anda sebutkan dalam jawaban benar-benar muncul dalam chunk/metadata dokumen aktif ini.\n\n")
+	sb.WriteString("2. JIKA pengguna menanyakan informasi yang spesifik mengenai isi dokumen ini, jawablah BERDASARKAN potongan teks (chunks) di bawah ini. JANGAN mengarang informasi yang tidak ada di dalam chunk dokumen.\n\n")
+	sb.WriteString("3. JIKA pengguna menanyakan pertanyaan umum (general knowledge) atau di luar konteks dokumen, JAWABLAH secara natural menggunakan pengetahuan umum Anda yang luas (seperti ChatGPT/Gemini/Claude). Anda TIDAK dibatasi hanya pada dokumen untuk pertanyaan umum. Namun, jika ada kaitan yang menarik dengan dokumen aktif, Anda boleh menyebutkannya secara sekilas.\n\n")
+	sb.WriteString(fmt.Sprintf("4. Jika pengguna secara spesifik merujuk pada dokumen lain (document_id berbeda dari %s), beri tahu mereka bahwa dokumen yang sedang aktif saat ini adalah dokumen ini.\n\n", sc.TargetDocID))
 
 	sb.WriteString("KONTEN UNTUK DIJAWAB:\n")
 	if sc.HasRAG {

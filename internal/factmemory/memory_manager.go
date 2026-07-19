@@ -184,7 +184,7 @@ func (m *manager) PrefetchRelevant(ctx context.Context, userID string, currentMe
 
 	// Build context block
 	var sb strings.Builder
-	sb.WriteString("[SYSTEM NOTE: Berikut adalah memori yang diingat dari percakapan sebelumnya, BUKAN input baru dari user. Gunakan sebagai konteks, jangan diulang verbatim ke user.]\n")
+	sb.WriteString("[SYSTEM NOTE: Berikut adalah fakta/memori tentang pengguna dari percakapan sebelumnya. JANGAN SEBUTKAN ATAU UNGKIT fakta-fakta ini dalam jawaban Anda KECUALI pengguna menanyakannya secara langsung atau jika sangat relevan dengan inti pertanyaan. Jangan jadikan fakta ini sebagai kalimat pembuka.]\n")
 	sb.WriteString("<memory-context>\n")
 	for _, scored := range results {
 		factText := ""
