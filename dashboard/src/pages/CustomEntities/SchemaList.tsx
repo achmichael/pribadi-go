@@ -34,14 +34,14 @@ export default function SchemaList() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-brand-900 mb-2">Entitas Kustom</h1>
-          <p className="text-brand-500">
+          <h1 className="font-sora text-2xl font-bold text-ink-primary mb-2">Entitas Kustom</h1>
+          <p className="text-ink-muted">
             Definisikan struktur data yang akan diekstraksi AI dari percakapan.
           </p>
         </div>
         <button
           onClick={() => navigate('/data-types/new')}
-          className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-medium hover:bg-emerald-700 transition-colors shadow-sm"
+          className="flex items-center justify-center gap-2 bg-accent-primary text-white px-5 py-2.5 rounded-xl font-medium hover:bg-accent-primary/90 transition-colors shadow-sm"
         >
           <Plus size={18} />
           <span>Buat Entitas</span>
@@ -49,7 +49,7 @@ export default function SchemaList() {
       </div>
 
       {/* List / Empty State */}
-      <div className="bg-white border border-brand-200 rounded-2xl shadow-sm overflow-hidden">
+      <div className="bg-surface border border-ink-primary/10 rounded-2xl shadow-sm overflow-hidden">
         {schemas.length === 0 ? (
           <div className="py-16">
             <EmptyState 
@@ -66,7 +66,7 @@ export default function SchemaList() {
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-brand-50/50 text-brand-500 text-xs uppercase tracking-wider border-b border-brand-100">
+                <tr className="bg-canvas/50 text-ink-muted text-xs uppercase tracking-wider border-b border-brand-100">
                   <th className="px-6 py-4 font-semibold">Nama Entitas</th>
                   <th className="px-6 py-4 font-semibold hidden sm:table-cell">Deskripsi</th>
                   <th className="px-6 py-4 font-semibold">Fields</th>
@@ -75,20 +75,20 @@ export default function SchemaList() {
               </thead>
               <tbody className="divide-y divide-brand-100">
                 {schemas.map((schema) => (
-                  <tr key={schema.id} className="hover:bg-brand-50/50 transition-colors">
+                  <tr key={schema.id} className="hover:bg-canvas/50 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="p-2 bg-brand-100 text-brand-600 rounded-lg shrink-0">
+                        <div className="p-2 bg-brand-100 text-ink-muted rounded-lg shrink-0">
                           <Database size={18} />
                         </div>
-                        <span className="font-semibold text-brand-900">{schema.name}</span>
+                        <span className="font-semibold text-ink-primary">{schema.name}</span>
                       </div>
                     </td>
-                    <td className="px-6 py-4 text-sm text-brand-500 hidden sm:table-cell">
+                    <td className="px-6 py-4 text-sm text-ink-muted hidden sm:table-cell">
                       {schema.description}
                     </td>
                     <td className="px-6 py-4">
-                      <span className="inline-flex items-center justify-center bg-brand-100 text-brand-700 text-xs font-bold px-2.5 py-1 rounded-md">
+                      <span className="inline-flex items-center justify-center bg-brand-100 text-ink-primary text-xs font-bold px-2.5 py-1 rounded-md">
                         {schema.fieldCount}
                       </span>
                     </td>
@@ -97,21 +97,21 @@ export default function SchemaList() {
                         <button 
                           title="Lihat Data"
                           onClick={() => navigate(`/data-types/${schema.id}/records`)}
-                          className="p-2 text-brand-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                          className="p-2 text-ink-muted/70 hover:text-accent-primary hover:bg-accent-primary/10 rounded-lg transition-colors"
                         >
                           <List size={18} />
                         </button>
                         <button 
                           title="Edit"
                           onClick={() => navigate(`/data-types/${schema.id}/edit`)}
-                          className="p-2 text-brand-400 hover:text-brand-700 hover:bg-brand-100 rounded-lg transition-colors"
+                          className="p-2 text-ink-muted/70 hover:text-ink-primary hover:bg-brand-100 rounded-lg transition-colors"
                         >
                           <Edit2 size={18} />
                         </button>
                         <button 
                           onClick={() => setSchemaToDelete(schema.id)}
                           title="Hapus"
-                          className="p-2 text-brand-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          className="p-2 text-ink-muted/70 hover:text-accent-danger hover:bg-accent-danger/10 rounded-lg transition-colors"
                         >
                           <Trash2 size={18} />
                         </button>

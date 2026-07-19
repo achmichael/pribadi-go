@@ -88,20 +88,20 @@ export default function EntityRecords() {
         <div className="flex items-center gap-3">
           <button 
             onClick={() => navigate('/data-types')}
-            className="p-2 text-brand-400 hover:text-brand-700 bg-white border border-brand-200 rounded-xl hover:bg-brand-50 transition-colors shadow-sm"
+            className="p-2 text-ink-muted/70 hover:text-ink-primary bg-surface border border-ink-primary/10 rounded-xl hover:bg-canvas transition-colors shadow-sm"
           >
             <ArrowLeft size={20} />
           </button>
           <div>
-            <h1 className="text-2xl font-bold text-brand-900">Data {MOCK_SCHEMA.title}</h1>
-            <p className="text-sm text-brand-500">Data ini diekstraksi secara otomatis oleh AI dari percakapan.</p>
+            <h1 className="font-sora text-2xl font-bold text-ink-primary">Data {MOCK_SCHEMA.title}</h1>
+            <p className="text-sm text-ink-muted">Data ini diekstraksi secara otomatis oleh AI dari percakapan.</p>
           </div>
         </div>
         
         <button
           onClick={handleExportCSV}
           disabled={loading || MOCK_RECORDS.length === 0}
-          className="flex items-center justify-center gap-2 bg-white text-brand-700 border border-brand-200 px-5 py-2.5 rounded-xl font-medium hover:bg-brand-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          className="flex items-center justify-center gap-2 bg-surface text-ink-primary border border-ink-primary/10 px-5 py-2.5 rounded-xl font-medium hover:bg-canvas transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
         >
           <Download size={18} />
           <span>Export CSV</span>
@@ -109,13 +109,13 @@ export default function EntityRecords() {
       </div>
 
       {/* Content */}
-      <div className="bg-white border border-brand-200 rounded-2xl shadow-sm overflow-hidden">
+      <div className="bg-surface border border-ink-primary/10 rounded-2xl shadow-sm overflow-hidden">
         {loading ? (
-          <div className="py-24 text-center text-brand-400">
+          <div className="py-24 text-center text-ink-muted/70">
             <div className="animate-pulse flex flex-col items-center">
               <div className="w-12 h-12 bg-brand-100 rounded-xl mb-4"></div>
               <div className="h-4 bg-brand-100 rounded w-48 mb-2"></div>
-              <div className="h-3 bg-brand-50 rounded w-32"></div>
+              <div className="h-3 bg-canvas rounded w-32"></div>
             </div>
           </div>
         ) : MOCK_RECORDS.length === 0 ? (
@@ -130,7 +130,7 @@ export default function EntityRecords() {
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-brand-50/50 text-brand-500 text-xs uppercase tracking-wider border-b border-brand-100">
+                <tr className="bg-canvas/50 text-ink-muted text-xs uppercase tracking-wider border-b border-brand-100">
                   <th className="px-6 py-4 font-semibold whitespace-nowrap">Waktu</th>
                   {/* Dynamic Columns from Schema */}
                   {schemaKeys.map((key) => (
@@ -143,8 +143,8 @@ export default function EntityRecords() {
               </thead>
               <tbody className="divide-y divide-brand-100">
                 {MOCK_RECORDS.map((record) => (
-                  <tr key={record.id} className="hover:bg-brand-50/50 transition-colors">
-                    <td className="px-6 py-4 text-sm text-brand-500 whitespace-nowrap">
+                  <tr key={record.id} className="hover:bg-canvas/50 transition-colors">
+                    <td className="px-6 py-4 text-sm text-ink-muted whitespace-nowrap">
                       {new Date(record.created_at).toLocaleString('id-ID', {
                         day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
                       })}
@@ -152,7 +152,7 @@ export default function EntityRecords() {
                     
                     {/* Dynamic Data Cells */}
                     {schemaKeys.map((key) => (
-                      <td key={key} className="px-6 py-4 text-brand-900 max-w-[200px] truncate">
+                      <td key={key} className="px-6 py-4 text-ink-primary max-w-[200px] truncate">
                         {(record.data as any)[key] || '-'}
                       </td>
                     ))}
@@ -160,7 +160,7 @@ export default function EntityRecords() {
                     <td className="px-6 py-4 text-right">
                       <button 
                         onClick={() => setSelectedChat(record.source_chat)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-100 text-brand-700 hover:bg-brand-200 hover:text-brand-900 rounded-lg text-sm font-medium transition-colors"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-100 text-ink-primary hover:bg-brand-200 hover:text-ink-primary rounded-lg text-sm font-medium transition-colors"
                       >
                         <MessageCircle size={16} />
                         <span className="hidden sm:inline">Lihat Chat</span>
@@ -181,12 +181,12 @@ export default function EntityRecords() {
         title="Cuplikan Sumber Chat"
       >
         <div className="mt-2 space-y-4">
-          <p className="text-sm text-brand-500">
+          <p className="text-sm text-ink-muted">
             Berikut adalah cuplikan pesan mentah dari pelanggan yang diekstraksi oleh AI menjadi format terstruktur:
           </p>
           
           <div className="bg-[#E5DDD5] p-4 rounded-xl max-w-sm">
-            <div className="bg-white rounded-lg p-3 shadow-sm relative text-sm text-gray-800">
+            <div className="bg-surface rounded-lg p-3 shadow-sm relative text-sm text-gray-800">
               {selectedChat}
               <div className="absolute top-0 -left-2 w-0 h-0 border-t-[10px] border-t-white border-l-[12px] border-l-transparent"></div>
             </div>
@@ -195,7 +195,7 @@ export default function EntityRecords() {
           <div className="flex justify-end pt-4 border-t border-brand-100">
             <button 
               onClick={() => setSelectedChat(null)}
-              className="bg-brand-100 text-brand-700 px-5 py-2 rounded-lg font-medium hover:bg-brand-200 transition-colors"
+              className="bg-brand-100 text-ink-primary px-5 py-2 rounded-lg font-medium hover:bg-brand-200 transition-colors"
             >
               Tutup
             </button>

@@ -76,20 +76,20 @@ export default function SchemaBuilder() {
         <div className="flex items-center gap-3">
           <button 
             onClick={() => navigate('/data-types')}
-            className="p-2 text-brand-400 hover:text-brand-700 bg-white border border-brand-200 rounded-xl hover:bg-brand-50 transition-colors shadow-sm"
+            className="p-2 text-ink-muted/70 hover:text-ink-primary bg-surface border border-ink-primary/10 rounded-xl hover:bg-canvas transition-colors shadow-sm"
           >
             <ArrowLeft size={20} />
           </button>
           <div>
-            <h1 className="text-2xl font-bold text-brand-900">Buat Entitas Baru</h1>
-            <p className="text-sm text-brand-500">Rancang struktur data yang akan ditangkap oleh AI.</p>
+            <h1 className="font-sora text-2xl font-bold text-ink-primary">Buat Entitas Baru</h1>
+            <p className="text-sm text-ink-muted">Rancang struktur data yang akan ditangkap oleh AI.</p>
           </div>
         </div>
         
         <button
           onClick={() => navigate('/data-types')} // Mock save
           disabled={!entityName || fields.length === 0}
-          className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          className="flex items-center justify-center gap-2 bg-accent-primary text-white px-6 py-2.5 rounded-xl font-medium hover:bg-accent-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
         >
           <Save size={18} />
           <span>Simpan Skema</span>
@@ -103,26 +103,26 @@ export default function SchemaBuilder() {
         <div className="space-y-6">
           
           {/* Info Card */}
-          <div className="bg-white border border-brand-200 rounded-2xl p-6 shadow-sm">
-            <h2 className="font-bold text-brand-900 mb-4">Informasi Dasar</h2>
+          <div className="bg-surface border border-ink-primary/10 rounded-2xl p-6 shadow-sm">
+            <h2 className="font-sora font-bold text-ink-primary mb-4">Informasi Dasar</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-semibold text-brand-700 mb-1.5 ml-1">Nama Entitas</label>
+                <label className="block text-sm font-semibold text-ink-primary mb-1.5 ml-1">Nama Entitas</label>
                 <input
                   type="text"
                   value={entityName}
                   onChange={(e) => setEntityName(e.target.value)}
-                  className="w-full bg-brand-50 border border-brand-200 rounded-xl px-4 py-2 text-brand-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                  className="w-full bg-canvas border border-ink-primary/10 rounded-xl px-4 py-2 text-ink-primary focus:bg-surface focus:ring-2 focus:ring-accent-primary/15 focus:border-accent-primary outline-none transition-all"
                   placeholder="Misal: Order Penjualan"
                 />
               </div>
               <div>
-                <label className="block text-sm font-semibold text-brand-700 mb-1.5 ml-1">Deskripsi (Untuk konteks AI)</label>
+                <label className="block text-sm font-semibold text-ink-primary mb-1.5 ml-1">Deskripsi (Untuk konteks AI)</label>
                 <textarea
                   value={entityDesc}
                   onChange={(e) => setEntityDesc(e.target.value)}
                   rows={2}
-                  className="w-full bg-brand-50 border border-brand-200 rounded-xl px-4 py-2 text-brand-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all resize-y"
+                  className="w-full bg-canvas border border-ink-primary/10 rounded-xl px-4 py-2 text-ink-primary focus:bg-surface focus:ring-2 focus:ring-accent-primary/15 focus:border-accent-primary outline-none transition-all resize-y"
                   placeholder="Formulir ini digunakan untuk..."
                 />
               </div>
@@ -130,12 +130,12 @@ export default function SchemaBuilder() {
           </div>
 
           {/* Fields Card */}
-          <div className="bg-white border border-brand-200 rounded-2xl p-6 shadow-sm">
+          <div className="bg-surface border border-ink-primary/10 rounded-2xl p-6 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="font-bold text-brand-900">Struktur Field</h2>
+              <h2 className="font-sora font-bold text-ink-primary">Struktur Field</h2>
               <button 
                 onClick={addField}
-                className="flex items-center gap-1.5 text-sm font-semibold text-emerald-600 hover:text-emerald-700 transition-colors"
+                className="flex items-center gap-1.5 text-sm font-semibold text-accent-primary hover:text-accent-primary transition-colors"
               >
                 <Plus size={16} /> Tambah Field
               </button>
@@ -143,11 +143,11 @@ export default function SchemaBuilder() {
 
             <div className="space-y-4">
               {fields.map((field) => (
-                <div key={field.id} className="relative bg-brand-50 border border-brand-200 p-4 rounded-xl space-y-3">
+                <div key={field.id} className="relative bg-canvas border border-ink-primary/10 p-4 rounded-xl space-y-3">
                   <div className="absolute top-4 right-4">
                     <button 
                       onClick={() => removeField(field.id)}
-                      className="text-brand-400 hover:text-rose-500 transition-colors"
+                      className="text-ink-muted/70 hover:text-rose-500 transition-colors"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -155,20 +155,20 @@ export default function SchemaBuilder() {
                   
                   <div className="grid grid-cols-2 gap-3 pr-8">
                     <div>
-                      <label className="block text-xs font-semibold text-brand-700 mb-1 ml-1">Nama Field (JSON Key)</label>
+                      <label className="block text-xs font-semibold text-ink-primary mb-1 ml-1">Nama Field (JSON Key)</label>
                       <input
                         type="text"
                         value={field.name}
                         onChange={(e) => updateField(field.id, { name: e.target.value.replace(/\s+/g, '') })}
-                        className="w-full bg-white border border-brand-200 rounded-lg px-3 py-1.5 text-sm text-brand-900 outline-none focus:border-emerald-500"
+                        className="w-full bg-surface border border-ink-primary/10 rounded-lg px-3 py-1.5 text-sm text-ink-primary outline-none focus:border-accent-primary"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold text-brand-700 mb-1 ml-1">Tipe Data</label>
+                      <label className="block text-xs font-semibold text-ink-primary mb-1 ml-1">Tipe Data</label>
                       <select
                         value={field.type}
                         onChange={(e) => updateField(field.id, { type: e.target.value as any })}
-                        className="w-full bg-white border border-brand-200 rounded-lg px-3 py-1.5 text-sm text-brand-900 outline-none focus:border-emerald-500"
+                        className="w-full bg-surface border border-ink-primary/10 rounded-lg px-3 py-1.5 text-sm text-ink-primary outline-none focus:border-accent-primary"
                       >
                         <option value="string">Teks (String)</option>
                         <option value="number">Angka (Number)</option>
@@ -178,12 +178,12 @@ export default function SchemaBuilder() {
                   </div>
                   
                   <div>
-                    <label className="block text-xs font-semibold text-brand-700 mb-1 ml-1">Label (Ditampilkan di UI)</label>
+                    <label className="block text-xs font-semibold text-ink-primary mb-1 ml-1">Label (Ditampilkan di UI)</label>
                     <input
                       type="text"
                       value={field.title}
                       onChange={(e) => updateField(field.id, { title: e.target.value })}
-                      className="w-full bg-white border border-brand-200 rounded-lg px-3 py-1.5 text-sm text-brand-900 outline-none focus:border-emerald-500"
+                      className="w-full bg-surface border border-ink-primary/10 rounded-lg px-3 py-1.5 text-sm text-ink-primary outline-none focus:border-accent-primary"
                     />
                   </div>
 
@@ -192,9 +192,9 @@ export default function SchemaBuilder() {
                       type="checkbox" 
                       checked={field.required}
                       onChange={(e) => updateField(field.id, { required: e.target.checked })}
-                      className="rounded text-emerald-600 focus:ring-emerald-500/20"
+                      className="rounded text-accent-primary focus:ring-accent-primary/15"
                     />
-                    <span className="text-xs font-semibold text-brand-700">Wajib diisi</span>
+                    <span className="text-xs font-semibold text-ink-primary">Wajib diisi</span>
                   </label>
                 </div>
               ))}
@@ -203,14 +203,14 @@ export default function SchemaBuilder() {
         </div>
 
         {/* RIGHT PANEL: Live Preview */}
-        <div className="bg-white border border-brand-200 rounded-2xl overflow-hidden shadow-sm sticky top-24">
+        <div className="bg-surface border border-ink-primary/10 rounded-2xl overflow-hidden shadow-sm sticky top-24">
           <div className="bg-brand-900 text-white px-5 py-3 flex items-center gap-2">
             <LayoutTemplate size={18} className="text-emerald-400" />
-            <h2 className="font-semibold text-sm">Live Preview</h2>
+            <h2 className="font-sora font-semibold text-sm">Live Preview</h2>
           </div>
-          <div className="p-6 overflow-y-auto max-h-[600px] bg-brand-50/30">
+          <div className="p-6 overflow-y-auto max-h-[600px] bg-canvas/30">
             {fields.length > 0 ? (
-              <div className="rjsf-preview-wrapper bg-white p-6 rounded-xl border border-brand-100 shadow-sm">
+              <div className="rjsf-preview-wrapper bg-surface p-6 rounded-xl border border-brand-100 shadow-sm">
                 <Form 
                   schema={getJsonSchema() as any} 
                   validator={validator} 
@@ -221,7 +221,7 @@ export default function SchemaBuilder() {
                 />
               </div>
             ) : (
-              <div className="text-center py-12 text-brand-400">
+              <div className="text-center py-12 text-ink-muted/70">
                 <LayoutTemplate size={48} className="mx-auto mb-3 opacity-20" />
                 <p className="text-sm">Tambahkan field untuk melihat pratinjau.</p>
               </div>

@@ -32,16 +32,16 @@ export function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-md' 
       />
       
       {/* Modal Panel */}
-      <div className={`bg-white rounded-2xl shadow-xl w-full ${maxWidth} relative z-10 animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[90vh]`}>
+      <div className={`bg-surface rounded-2xl shadow-xl w-full ${maxWidth} relative z-10 animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[90vh]`}>
         
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-brand-100">
           {title ? (
-            <h3 className="font-semibold text-brand-900 text-lg">{title}</h3>
+            <h3 className="font-sora font-semibold text-ink-primary text-lg">{title}</h3>
           ) : <div />}
           <button 
             onClick={onClose}
-            className="text-brand-400 hover:text-brand-700 bg-brand-50 hover:bg-brand-100 p-1.5 rounded-full transition-colors"
+            className="text-ink-muted/70 hover:text-ink-primary bg-canvas hover:bg-brand-100 p-1.5 rounded-full transition-colors"
           >
             <X size={20} />
           </button>

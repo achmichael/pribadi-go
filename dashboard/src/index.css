@@ -4,6 +4,26 @@
 
 @layer base {
   body {
-    @apply bg-brand-50 text-brand-900;
+    @apply bg-canvas text-ink-primary font-sans;
+  }
+}
+
+@layer utilities {
+  .pulse-ring-slow {
+    animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  .pulse-ring-fast {
+    animation: pulse-ring 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+}
+
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.4;
+  }
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
   }
 }

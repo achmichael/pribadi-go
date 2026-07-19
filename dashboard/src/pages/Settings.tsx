@@ -5,7 +5,7 @@ import { COPY } from '../lib/copy';
 export default function SettingsPage() {
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-brand-900">{COPY.MENU_SETTINGS}</h1>
+      <h1 className="font-sora text-2xl font-bold text-ink-primary">{COPY.MENU_SETTINGS}</h1>
       <EmptyState
         icon={Settings}
         title="Pengaturan"

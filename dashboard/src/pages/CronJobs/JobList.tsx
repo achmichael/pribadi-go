@@ -57,14 +57,14 @@ export default function JobList() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-brand-900 mb-2">Penjadwalan Tugas</h1>
-          <p className="text-brand-500">
+          <h1 className="font-sora text-2xl font-bold text-ink-primary mb-2">Penjadwalan Tugas</h1>
+          <p className="text-ink-muted">
             Atur asisten AI untuk mengirim pesan proaktif pada waktu tertentu.
           </p>
         </div>
         <button
           onClick={() => navigate('/schedules/new')}
-          className="flex items-center justify-center gap-2 bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-medium hover:bg-emerald-700 transition-colors shadow-sm"
+          className="flex items-center justify-center gap-2 bg-accent-primary text-white px-5 py-2.5 rounded-xl font-medium hover:bg-accent-primary/90 transition-colors shadow-sm"
         >
           <Plus size={18} />
           <span>Buat Jadwal Baru</span>
@@ -72,7 +72,7 @@ export default function JobList() {
       </div>
 
       {/* List / Empty State */}
-      <div className="bg-white border border-brand-200 rounded-2xl shadow-sm overflow-hidden">
+      <div className="bg-surface border border-ink-primary/10 rounded-2xl shadow-sm overflow-hidden">
         {jobs.length === 0 ? (
           <div className="py-16">
             <EmptyState 
@@ -89,7 +89,7 @@ export default function JobList() {
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-brand-50/50 text-brand-500 text-xs uppercase tracking-wider border-b border-brand-100">
+                <tr className="bg-canvas/50 text-ink-muted text-xs uppercase tracking-wider border-b border-brand-100">
                   <th className="px-6 py-4 font-semibold">Tugas / Pesan</th>
                   <th className="px-6 py-4 font-semibold">Target</th>
                   <th className="px-6 py-4 font-semibold">Waktu Eksekusi</th>
@@ -99,24 +99,24 @@ export default function JobList() {
               </thead>
               <tbody className="divide-y divide-brand-100">
                 {jobs.map((j) => (
-                  <tr key={j.id} className="hover:bg-brand-50/50 transition-colors">
+                  <tr key={j.id} className="hover:bg-canvas/50 transition-colors">
                     <td className="px-6 py-4">
-                      <div className="font-semibold text-brand-900">{j.name}</div>
-                      <div className="text-xs text-brand-500 mt-0.5">{j.job_type.replace('_', ' ')}</div>
+                      <div className="font-semibold text-ink-primary">{j.name}</div>
+                      <div className="text-xs text-ink-muted mt-0.5">{j.job_type.replace('_', ' ')}</div>
                     </td>
-                    <td className="px-6 py-4 text-sm font-medium text-brand-700">
+                    <td className="px-6 py-4 text-sm font-medium text-ink-primary">
                       {j.target_whatsapp_jid}
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-sm font-semibold text-brand-900">{j.frequency}</div>
-                      <div className="text-xs text-brand-500 mt-0.5">{j.schedule_time}</div>
+                      <div className="text-sm font-semibold text-ink-primary">{j.frequency}</div>
+                      <div className="text-xs text-ink-muted mt-0.5">{j.schedule_time}</div>
                     </td>
                     <td className="px-6 py-4">
                       <button
                         onClick={() => toggleActive(j.id)}
                         className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
                           j.is_active 
-                            ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' 
+                            ? 'bg-accent-primary/10 text-accent-primary hover:bg-emerald-100' 
                             : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                         }`}
                       >
@@ -129,14 +129,14 @@ export default function JobList() {
                         <button 
                           title="Edit"
                           onClick={() => navigate(`/schedules/${j.id}/edit`)}
-                          className="p-2 text-brand-400 hover:text-brand-700 hover:bg-brand-100 rounded-lg transition-colors"
+                          className="p-2 text-ink-muted/70 hover:text-ink-primary hover:bg-brand-100 rounded-lg transition-colors"
                         >
                           <Edit2 size={18} />
                         </button>
                         <button 
                           onClick={() => setJobToDelete(j.id)}
                           title="Hapus"
-                          className="p-2 text-brand-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          className="p-2 text-ink-muted/70 hover:text-accent-danger hover:bg-accent-danger/10 rounded-lg transition-colors"
                         >
                           <Trash2 size={18} />
                         </button>

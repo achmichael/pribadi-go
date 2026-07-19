@@ -77,10 +77,10 @@ export function FileUpload({
         onClick={() => !isUploading && fileInputRef.current?.click()}
         className={`relative border-2 border-dashed rounded-2xl p-8 flex flex-col items-center justify-center text-center transition-all ${
           isUploading 
-            ? 'border-brand-200 bg-brand-50 cursor-default'
+            ? 'border-ink-primary/10 bg-canvas cursor-default'
             : isDragging
-              ? 'border-emerald-500 bg-emerald-50/50'
-              : 'border-brand-200 bg-white hover:bg-brand-50 hover:border-brand-300 cursor-pointer'
+              ? 'border-accent-primary bg-accent-primary/10/50'
+              : 'border-ink-primary/10 bg-surface hover:bg-canvas hover:border-ink-primary/20 cursor-pointer'
         }`}
       >
         <input 
@@ -93,20 +93,20 @@ export function FileUpload({
         />
 
         {isUploading ? (
-          <div className="flex flex-col items-center text-emerald-600 animate-in fade-in duration-300">
+          <div className="flex flex-col items-center text-accent-primary animate-in fade-in duration-300">
             <Loader2 size={40} className="animate-spin mb-4" />
-            <span className="font-semibold text-brand-900">Mengunggah...</span>
-            <span className="text-sm text-brand-500 mt-1">Sedang dipelajari AI, butuh waktu beberapa saat.</span>
+            <span className="font-semibold text-ink-primary">Mengunggah...</span>
+            <span className="text-sm text-ink-muted mt-1">Sedang dipelajari AI, butuh waktu beberapa saat.</span>
           </div>
         ) : (
           <>
-            <div className={`p-4 rounded-full mb-4 transition-colors ${isDragging ? 'bg-emerald-100 text-emerald-600' : 'bg-brand-100 text-brand-500'}`}>
+            <div className={`p-4 rounded-full mb-4 transition-colors ${isDragging ? 'bg-emerald-100 text-accent-primary' : 'bg-brand-100 text-ink-muted'}`}>
               <UploadCloud size={32} />
             </div>
-            <h3 className="font-semibold text-brand-900 mb-1">
+            <h3 className="font-sora font-semibold text-ink-primary mb-1">
               {isDragging ? 'Lepaskan file di sini' : 'Klik atau seret file ke area ini'}
             </h3>
-            <p className="text-sm text-brand-500">
+            <p className="text-sm text-ink-muted">
               Format PDF atau TXT (Maks. {maxSizeMB}MB)
             </p>
           </>
@@ -114,7 +114,7 @@ export function FileUpload({
       </div>
 
       {error && (
-        <div className="mt-3 flex items-center gap-2 text-rose-600 bg-rose-50 px-4 py-3 rounded-xl border border-rose-100 animate-in fade-in slide-in-from-top-2 duration-300">
+        <div className="mt-3 flex items-center gap-2 text-accent-danger bg-accent-danger/10 px-4 py-3 rounded-xl border border-rose-100 animate-in fade-in slide-in-from-top-2 duration-300">
           <AlertCircle size={18} />
           <span className="text-sm font-medium">{error}</span>
           <button 

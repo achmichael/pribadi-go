@@ -24,7 +24,7 @@ const BottomNav = () => {
       {/* Spacer for bottom nav */}
       <div className="h-16 lg:hidden" />
       
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-brand-200 flex items-center justify-around z-50 px-2 pb-safe">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-surface border-t border-ink-primary/10 flex items-center justify-around z-50 px-2 pb-safe">
         {mainLinks.map((link) => {
           const Icon = link.icon;
           return (
@@ -34,8 +34,8 @@ const BottomNav = () => {
               className={({ isActive }) =>
                 `flex flex-col items-center justify-center w-full h-16 space-y-1 transition-colors ${
                   isActive
-                    ? 'text-emerald-600'
-                    : 'text-brand-500 hover:text-brand-900'
+                    ? 'text-accent-primary'
+                    : 'text-ink-muted hover:text-ink-primary'
                 }`
               }
             >
@@ -47,7 +47,7 @@ const BottomNav = () => {
         
         {/* More Button */}
         <button 
-          className={`flex flex-col items-center justify-center w-full h-16 space-y-1 transition-colors ${isMoreOpen ? 'text-emerald-600' : 'text-brand-500'}`}
+          className={`flex flex-col items-center justify-center w-full h-16 space-y-1 transition-colors ${isMoreOpen ? 'text-accent-primary' : 'text-ink-muted'}`}
           onClick={() => setIsMoreOpen(!isMoreOpen)}
         >
           <Menu size={20} />
@@ -58,8 +58,8 @@ const BottomNav = () => {
       {/* Mobile More Menu Overlay (Placeholder for now, will implement properly in Phase 2/11) */}
       {isMoreOpen && (
         <div className="lg:hidden fixed inset-0 z-40 bg-black/50" onClick={() => setIsMoreOpen(false)}>
-          <div className="absolute bottom-16 left-0 right-0 bg-white rounded-t-xl p-4 shadow-lg animate-in slide-in-from-bottom-2">
-            <p className="text-center text-brand-500 text-sm py-4">Menu lanjutan akan muncul di sini (Tahap selanjutnya)</p>
+          <div className="absolute bottom-16 left-0 right-0 bg-surface rounded-t-xl p-4 shadow-lg animate-in slide-in-from-bottom-2">
+            <p className="text-center text-ink-muted text-sm py-4">Menu lanjutan akan muncul di sini (Tahap selanjutnya)</p>
           </div>
         </div>
       )}

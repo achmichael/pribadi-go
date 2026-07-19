@@ -27,14 +27,14 @@ export function ConfirmDialog({
       <div className="flex flex-col items-center text-center space-y-4 pt-4">
         
         {/* Warning Icon */}
-        <div className={`p-4 rounded-full ${isDestructive ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'}`}>
+        <div className={`p-4 rounded-full ${isDestructive ? 'bg-rose-100 text-accent-danger' : 'bg-accent-warm/20 text-amber-600'}`}>
           <AlertTriangle size={32} />
         </div>
         
         {/* Texts */}
         <div className="space-y-2">
-          <h3 className="text-xl font-bold text-brand-900">{title}</h3>
-          <p className="text-brand-500 text-sm">{message}</p>
+          <h3 className="font-sora text-xl font-bold text-ink-primary">{title}</h3>
+          <p className="text-ink-muted text-sm">{message}</p>
         </div>
 
         {/* Actions */}
@@ -47,7 +47,7 @@ export function ConfirmDialog({
             className={`w-full py-3 rounded-xl font-medium transition-colors ${
               isDestructive 
                 ? 'bg-rose-600 hover:bg-rose-700 text-white' 
-                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                : 'bg-accent-primary hover:bg-accent-primary/90 text-white'
             }`}
           >
             {confirmLabel}
@@ -55,7 +55,7 @@ export function ConfirmDialog({
           
           <button
             onClick={onClose}
-            className="w-full py-3 rounded-xl font-medium text-brand-600 hover:bg-brand-50 transition-colors"
+            className="w-full py-3 rounded-xl font-medium text-ink-muted hover:bg-canvas transition-colors"
           >
             {cancelLabel}
           </button>

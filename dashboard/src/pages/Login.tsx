@@ -32,20 +32,20 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-brand-50 p-4">
-      <div className="bg-white p-8 sm:p-10 rounded-2xl shadow-sm border border-brand-200 w-full max-w-[420px]">
+    <div className="min-h-screen flex items-center justify-center bg-canvas p-4">
+      <div className="bg-surface p-8 sm:p-10 rounded-2xl shadow-sm border border-ink-primary/10 w-full max-w-[420px]">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 bg-brand-100 text-brand-600 rounded-2xl flex items-center justify-center mb-4 shadow-sm">
+          <div className="w-16 h-16 bg-brand-100 text-ink-muted rounded-2xl flex items-center justify-center mb-4 shadow-sm">
             <Brain size={32} />
           </div>
-          <h1 className="text-2xl font-bold text-brand-900">Control Panel AI</h1>
-          <p className="text-brand-500 text-sm mt-2 text-center">
+          <h1 className="font-sora text-2xl font-bold text-ink-primary">Control Panel AI</h1>
+          <p className="text-ink-muted text-sm mt-2 text-center">
             Masuk untuk mengelola asisten AI pribadi Anda.
           </p>
         </div>
 
         {error && (
-          <div className="bg-rose-50 border border-rose-200 text-rose-600 px-4 py-3 rounded-lg mb-6 text-sm flex items-start gap-2">
+          <div className="bg-accent-danger/10 border border-rose-200 text-accent-danger px-4 py-3 rounded-lg mb-6 text-sm flex items-start gap-2">
             <span className="shrink-0 mt-0.5">⚠️</span>
             <span>{error}</span>
           </div>
@@ -53,16 +53,16 @@ const Login = () => {
 
         <form onSubmit={handleLogin} className="space-y-5">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-brand-700 ml-1">Username</label>
+            <label className="text-sm font-medium text-ink-primary ml-1">Username</label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-brand-400">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-ink-muted/70">
                 <User size={18} />
               </div>
               <input
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-brand-50 border border-brand-200 rounded-xl text-brand-900 placeholder-brand-400 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none"
+                className="w-full pl-10 pr-4 py-2.5 bg-canvas border border-ink-primary/10 rounded-xl text-ink-primary placeholder-brand-400 focus:bg-surface focus:ring-2 focus:ring-accent-primary/15 focus:border-accent-primary transition-all outline-none"
                 placeholder="Masukkan username Anda"
                 required
               />
@@ -70,16 +70,16 @@ const Login = () => {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-sm font-medium text-brand-700 ml-1">Password</label>
+            <label className="text-sm font-medium text-ink-primary ml-1">Password</label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-brand-400">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-ink-muted/70">
                 <Lock size={18} />
               </div>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-brand-50 border border-brand-200 rounded-xl text-brand-900 placeholder-brand-400 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none"
+                className="w-full pl-10 pr-4 py-2.5 bg-canvas border border-ink-primary/10 rounded-xl text-ink-primary placeholder-brand-400 focus:bg-surface focus:ring-2 focus:ring-accent-primary/15 focus:border-accent-primary transition-all outline-none"
                 placeholder="••••••••"
                 required
               />
@@ -89,7 +89,7 @@ const Login = () => {
           <button
             type="submit"
             disabled={isLoading || !username || !password}
-            className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white rounded-xl py-3 px-4 font-medium hover:bg-emerald-700 active:scale-[0.98] transition-all disabled:opacity-70 disabled:cursor-not-allowed disabled:active:scale-100 shadow-sm mt-2"
+            className="w-full flex items-center justify-center gap-2 bg-accent-primary text-white rounded-xl py-3 px-4 font-medium hover:bg-accent-primary/90 active:scale-[0.98] transition-all disabled:opacity-70 disabled:cursor-not-allowed disabled:active:scale-100 shadow-sm mt-2"
           >
             {isLoading ? (
               <Loader2 size={20} className="animate-spin" />

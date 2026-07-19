@@ -59,8 +59,8 @@ export default function AgentConfig() {
       
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-brand-900 mb-2">Konfigurasi Agen AI</h1>
-        <p className="text-brand-500">
+        <h1 className="font-sora text-2xl font-bold text-ink-primary mb-2">Konfigurasi Agen AI</h1>
+        <p className="text-ink-muted">
           Atur identitas, kepribadian, dan cara AI merespons pesan pengguna.
         </p>
       </div>
@@ -74,19 +74,19 @@ export default function AgentConfig() {
           <div className="lg:col-span-2 space-y-6">
             
             {/* Identitas AI */}
-            <div className="bg-white border border-brand-200 rounded-2xl p-6 shadow-sm">
-              <div className="flex items-center gap-2 text-brand-900 font-bold mb-6">
-                <Bot size={20} className="text-emerald-600" />
+            <div className="bg-surface border border-ink-primary/10 rounded-2xl p-6 shadow-sm">
+              <div className="flex items-center gap-2 text-ink-primary font-bold mb-6">
+                <Bot size={20} className="text-accent-primary" />
                 <h2>Identitas AI</h2>
               </div>
               
               <div className="space-y-5">
                 <div>
-                  <label className="block text-sm font-semibold text-brand-700 mb-1.5 ml-1">Nama Asisten</label>
+                  <label className="block text-sm font-semibold text-ink-primary mb-1.5 ml-1">Nama Asisten</label>
                   <input
                     {...register('botName')}
                     type="text"
-                    className="w-full bg-brand-50 border border-brand-200 rounded-xl px-4 py-2.5 text-brand-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none"
+                    className="w-full bg-canvas border border-ink-primary/10 rounded-xl px-4 py-2.5 text-ink-primary focus:bg-surface focus:ring-2 focus:ring-accent-primary/15 focus:border-accent-primary transition-all outline-none"
                     placeholder="Contoh: CS Toko, Jojo, AI Assistant..."
                   />
                   {errors.botName && (
@@ -95,10 +95,10 @@ export default function AgentConfig() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-brand-700 mb-1.5 ml-1">Gaya Bahasa</label>
+                  <label className="block text-sm font-semibold text-ink-primary mb-1.5 ml-1">Gaya Bahasa</label>
                   <select
                     {...register('persona')}
-                    className="w-full bg-brand-50 border border-brand-200 rounded-xl px-4 py-2.5 text-brand-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none appearance-none"
+                    className="w-full bg-canvas border border-ink-primary/10 rounded-xl px-4 py-2.5 text-ink-primary focus:bg-surface focus:ring-2 focus:ring-accent-primary/15 focus:border-accent-primary transition-all outline-none appearance-none"
                   >
                     <option value="profesional">Profesional (Tegas & Langsung ke inti)</option>
                     <option value="formal">Formal (Baku & Resmi)</option>
@@ -110,17 +110,17 @@ export default function AgentConfig() {
             </div>
 
             {/* Perilaku Inti */}
-            <div className="bg-white border border-brand-200 rounded-2xl p-6 shadow-sm">
-              <div className="flex items-center gap-2 text-brand-900 font-bold mb-6">
-                <MessageSquare size={20} className="text-emerald-600" />
+            <div className="bg-surface border border-ink-primary/10 rounded-2xl p-6 shadow-sm">
+              <div className="flex items-center gap-2 text-ink-primary font-bold mb-6">
+                <MessageSquare size={20} className="text-accent-primary" />
                 <h2>Perilaku Inti (System Prompt)</h2>
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-1.5 ml-1">
-                  <label className="text-sm font-semibold text-brand-700">Instruksi Khusus</label>
+                  <label className="text-sm font-semibold text-ink-primary">Instruksi Khusus</label>
                   <div className="group relative cursor-help">
-                    <Info size={16} className="text-brand-400 hover:text-brand-600" />
+                    <Info size={16} className="text-ink-muted/70 hover:text-ink-muted" />
                     <div className="absolute bottom-full right-0 mb-2 w-64 bg-brand-900 text-brand-50 text-xs p-3 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl z-10">
                       Berikan konteks tambahan seperti jam buka, kebijakan refund, atau cara AI harus menjawab jika ia tidak mengetahui jawabannya.
                     </div>
@@ -130,14 +130,14 @@ export default function AgentConfig() {
                 <textarea
                   {...register('systemPrompt')}
                   rows={8}
-                  className="w-full bg-brand-50 border border-brand-200 rounded-xl px-4 py-3 text-brand-900 focus:bg-white focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none resize-y"
+                  className="w-full bg-canvas border border-ink-primary/10 rounded-xl px-4 py-3 text-ink-primary focus:bg-surface focus:ring-2 focus:ring-accent-primary/15 focus:border-accent-primary transition-all outline-none resize-y"
                   placeholder="Ceritakan siapa AI ini dan apa tugas utamanya..."
                 />
                 <div className="flex justify-between items-center mt-1 ml-1">
                   {errors.systemPrompt ? (
                     <p className="text-rose-500 text-sm">{errors.systemPrompt.message}</p>
                   ) : (
-                    <p className="text-brand-400 text-xs">Maksimal 2000 karakter</p>
+                    <p className="text-ink-muted/70 text-xs">Maksimal 2000 karakter</p>
                   )}
                 </div>
               </div>
@@ -149,16 +149,16 @@ export default function AgentConfig() {
           <div className="space-y-6">
             
             {/* Preferensi Sistem */}
-            <div className="bg-white border border-brand-200 rounded-2xl p-6 shadow-sm">
-              <div className="flex items-center gap-2 text-brand-900 font-bold mb-6">
-                <Settings2 size={20} className="text-emerald-600" />
+            <div className="bg-surface border border-ink-primary/10 rounded-2xl p-6 shadow-sm">
+              <div className="flex items-center gap-2 text-ink-primary font-bold mb-6">
+                <Settings2 size={20} className="text-accent-primary" />
                 <h2>Preferensi Sistem</h2>
               </div>
 
-              <div className="flex items-start justify-between gap-4 p-4 bg-brand-50 rounded-xl border border-brand-100">
+              <div className="flex items-start justify-between gap-4 p-4 bg-canvas rounded-xl border border-brand-100">
                 <div>
-                  <h3 className="text-sm font-semibold text-brand-900">Balas Otomatis</h3>
-                  <p className="text-xs text-brand-500 mt-1 leading-relaxed">
+                  <h3 className="font-sora text-sm font-semibold text-ink-primary">Balas Otomatis</h3>
+                  <p className="text-xs text-ink-muted mt-1 leading-relaxed">
                     Izinkan AI untuk langsung membalas pesan pengguna.
                   </p>
                 </div>
@@ -168,13 +168,13 @@ export default function AgentConfig() {
                     {...register('autoReply')}
                     className="sr-only peer" 
                   />
-                  <div className="w-11 h-6 bg-brand-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-brand-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+                  <div className="w-11 h-6 bg-brand-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-surface after:border-ink-primary/20 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-accent-primary"></div>
                 </label>
               </div>
 
               {!autoReplyState && (
-                <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-                  <p className="text-xs text-amber-700 font-medium">
+                <div className="mt-4 p-3 bg-amber-50 border border-accent-warm/30 rounded-xl">
+                  <p className="text-xs text-accent-warm font-medium">
                     ⚠️ AI tidak akan membalas pesan. Ia hanya akan membuat draft balasan di dashboard (fitur ini sedang dalam pengembangan).
                   </p>
                 </div>
@@ -185,11 +185,11 @@ export default function AgentConfig() {
         </div>
 
         {/* Action Bottom Bar */}
-        <div className="fixed bottom-0 left-0 right-0 lg:left-64 bg-white border-t border-brand-200 p-4 px-6 flex justify-end shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-20">
+        <div className="fixed bottom-0 left-0 right-0 lg:left-64 bg-surface border-t border-ink-primary/10 p-4 px-6 flex justify-end shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-20">
           <button
             type="submit"
             disabled={!isDirty || isSaving}
-            className="flex items-center gap-2 bg-emerald-600 text-white px-6 py-2.5 rounded-xl font-medium hover:bg-emerald-700 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+            className="flex items-center gap-2 bg-accent-primary text-white px-6 py-2.5 rounded-xl font-medium hover:bg-accent-primary/90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
           >
             {isSaving ? (
               <Loader2 size={18} className="animate-spin" />

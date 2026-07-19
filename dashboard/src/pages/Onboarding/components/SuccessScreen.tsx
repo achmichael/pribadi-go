@@ -6,15 +6,15 @@ export function SuccessScreen() {
 
   return (
     <div className="flex flex-col items-center text-center space-y-8 animate-in zoom-in-95 duration-500">
-      <div className="w-24 h-24 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center shadow-sm">
+      <div className="w-24 h-24 bg-emerald-100 text-accent-primary rounded-full flex items-center justify-center shadow-sm">
         <PartyPopper size={48} />
       </div>
       
       <div className="space-y-4 max-w-md mx-auto">
-        <h1 className="text-3xl font-bold text-brand-900">
+        <h1 className="font-sora text-3xl font-bold text-ink-primary">
           Semua Selesai!
         </h1>
-        <p className="text-brand-500 text-lg leading-relaxed">
+        <p className="text-ink-muted text-lg leading-relaxed">
           Asisten AI Anda sudah aktif dan terhubung. Anda sekarang dapat mulai melatihnya dan memantau kinerjanya dari Dashboard.
         </p>
       </div>

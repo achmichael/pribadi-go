@@ -22,7 +22,7 @@ export function Toast({ message, isVisible, onClose, duration = 3000 }: ToastPro
 
   return (
     <div className="fixed bottom-4 right-4 z-50 animate-in slide-in-from-bottom-5 fade-in duration-300">
-      <div className="bg-emerald-600 text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-3">
+      <div className="bg-accent-primary text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-3">
         <CheckCircle2 size={20} className="text-emerald-100" />
         <span className="text-sm font-medium pr-4">{message}</span>
         <button 
