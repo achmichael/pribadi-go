@@ -33,16 +33,16 @@ type SessionContext struct {
 	PromptTemplate string
 
 	// RAG
-	RAGContext   string
-	HasRAG       bool
-	RAGSources   []string
+	RAGContext string
+	HasRAG     bool
+	RAGSources []string
 
 	// Memory
 	MemoryContext string
 
 	// Document isolation
-	MetadataBlock  string
-	TargetDocID    string
+	MetadataBlock string
+	TargetDocID   string
 
 	// User preferences as readable block
 	PreferencesBlock string
@@ -88,7 +88,7 @@ func (b *Builder) buildFromTemplate(sc SessionContext) string {
 	if sc.MemoryContext != "" {
 		sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", sc.MemoryContext)
 	} else {
-		sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", "(Tidak ada fakta relevan)")
+		sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", "")
 	}
 
 	// Document metadata
@@ -121,11 +121,6 @@ func (b *Builder) buildFromScratch(sc SessionContext) string {
 	if rules != "" {
 		sb.WriteString(rules)
 		sb.WriteString("\n\n")
-	}
-
-	// User display name
-	if sc.State != nil && sc.State.UserDisplayName != "" {
-		sb.WriteString(fmt.Sprintf("Panggil pengguna dengan nama: %s\n\n", sc.State.UserDisplayName))
 	}
 
 	// Memory
@@ -264,7 +259,7 @@ func (b *Builder) behavioralRules(sc SessionContext) string {
 
 	// User display name
 	if sc.State != nil && sc.State.UserDisplayName != "" {
-		sb.WriteString(fmt.Sprintf("9. Panggil pengguna dengan nama: %s\n", sc.State.UserDisplayName))
+		sb.WriteString(fmt.Sprintf("9. Nama pengguna adalah '%s' (Gunakan secara natural jika perlu, tidak perlu selalu disebutkan).\n", sc.State.UserDisplayName))
 	}
 
 	return sb.String()

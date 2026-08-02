@@ -57,13 +57,13 @@ type MemoryManager interface {
 // ─── Config ────────────────────────────────────────────────────────
 
 const (
-	collectionName = "user_facts"
-	vectorSize     = 768 // nomic-embed-text
-	prefetchTopK   = 5
-	prefetchMinScore float32 = 0.35
-	dedupThreshold float32 = 0.92 // cosine similarity above this = duplicate
-	workerCount    = 2
-	channelCap     = 50
+	collectionName           = "user_facts"
+	vectorSize               = 768 // nomic-embed-text
+	prefetchTopK             = 5
+	prefetchMinScore float32 = 0.8
+	dedupThreshold   float32 = 0.92 // cosine similarity above this = duplicate
+	workerCount              = 2
+	channelCap               = 50
 )
 
 // ─── Implementation ────────────────────────────────────────────────
@@ -548,7 +548,7 @@ func (m *manager) dedupAndStore(ctx context.Context, userID string, fact extract
 		Category:        fact.Category,
 		SourceMessageID: sql.NullInt64{}, // optional, not tracked here
 	})
-	
+
 	if err != nil {
 		return fmt.Errorf("insert fact: %w", err)
 	}

@@ -15,3 +15,4 @@ whisper.cpp/*
 whisper_server/*
 AGENTS.md
 bin/*
+graphify-out/*
