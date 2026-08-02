@@ -27,6 +27,7 @@ type Repository interface {
 	ListMessagesByJID(ctx context.Context, jid string, limit, offset int64) ([]sqlc.Message, error)
 	UpdateMessage(ctx context.Context, arg sqlc.UpdateMessageParams) (sqlc.Message, error)
 	DeleteMessage(ctx context.Context, id int64) error
+	DeleteMessagesByUserSession(ctx context.Context, userID, sessionID string) error
 
 	GetDB() *sql.DB
 
@@ -91,6 +92,9 @@ type Repository interface {
 	ListUserPreferences(ctx context.Context, userID string) ([]UserPreferenceRow, error)
 	UpsertUserPreference(ctx context.Context, arg UpsertUserPreferenceParams) error
 	DeleteUserPreference(ctx context.Context, userID, prefKey string) error
+
+	// ── New: session state ──
+	DeleteConversationState(ctx context.Context, userID, sessionID string) error
 
 	Close() error
 }
@@ -686,7 +690,7 @@ func (r *sqliteRepo) GetUserDocumentByID(ctx context.Context, id string) (*UserD
 		 WHERE id = ?`,
 		id,
 	)
-	
+
 	var d UserDocument
 	if err := row.Scan(
 		&d.ID, &d.UserID, &d.PlatformMsgID,
@@ -821,4 +825,20 @@ func (r *sqliteRepo) DeleteUserPreference(ctx context.Context, userID, prefKey s
 		userID, prefKey,
 	)
 	return err
+}
+
+func (r *sqliteRepo) DeleteMessagesByUserSession(ctx context.Context, userID, sessionID string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM messages_v2 WHERE user_id = ? AND session_id = ?", userID, sessionID)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *sqliteRepo) DeleteConversationState(ctx context.Context, userID, sessionID string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM conversation_states WHERE user_id = ? AND session_id = ?", userID, sessionID)
+	if err != nil {
+		return err
+	}
+	return nil
 }

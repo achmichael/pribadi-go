@@ -50,6 +50,8 @@ type MemoryManager interface {
 	// DeactivateFact deactivates a fact in SQLite and removes it from Qdrant.
 	DeactivateFact(ctx context.Context, userID string, factID int64) error
 
+	PurgeMemory(ctx context.Context, userID string) error
+
 	// Close shuts down the worker pool and Qdrant connection.
 	Close()
 }
@@ -676,4 +678,47 @@ func (m *manager) Close() {
 	close(m.jobs)
 	m.conn.Close()
 	m.logger.Info().Msg("[factmemory] shut down")
+}
+
+// this func to purge fact in qdrant with user_id
+func (m *manager) PurgeMemory(ctx context.Context, userID string) error {
+	wait := true
+	_, err := m.points.Delete(ctx, &pb.DeletePoints{
+		CollectionName: collectionName,
+		Wait:           &wait,
+		Points: &pb.PointsSelector{
+			PointsSelectorOneOf: &pb.PointsSelector_Filter{
+				Filter: &pb.Filter{
+					Must: []*pb.Condition{
+						{
+							ConditionOneOf: &pb.Condition_Field{
+								Field: &pb.FieldCondition{
+									Key: "user_id",
+									Match: &pb.Match{
+										MatchValue: &pb.Match_Keyword{
+											Keyword: userID,
+										},
+									},
+								},
+							},
+						},
+						{
+							ConditionOneOf: &pb.Condition_Field{
+								Field: &pb.FieldCondition{
+									Key: "type",
+									Match: &pb.Match{
+										MatchValue: &pb.Match_Keyword{
+											Keyword: strings.TrimSuffix(collectionName, "s"),
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	return err
 }

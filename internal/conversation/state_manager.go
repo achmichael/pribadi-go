@@ -28,6 +28,8 @@ type StateManager interface {
 	// GetRaw returns the raw DB row (for turn_count, timestamps, etc.).
 	GetRaw(ctx context.Context, userID, sessionID string) (*repository.ConversationStateRow, error)
 
+	DeleteState(ctx context.Context, userID, sessionID string) error
+
 	// ApplyPreferences merges persistent user preferences into state.
 	// Preferences are lower priority than explicit session state.
 	ApplyPreferences(ctx context.Context, userID string, state *domain.StateData) error
@@ -47,6 +49,10 @@ func NewStateManager(repo repository.Repository, logger *zerolog.Logger) StateMa
 		repo:   repo,
 		logger: logger,
 	}
+}
+
+func (m *stateManager) DeleteState(ctx context.Context, userID, sessionID string) error {
+	return m.repo.DeleteConversationState(ctx, userID, sessionID)
 }
 
 func (m *stateManager) Load(ctx context.Context, userID, sessionID string) (*domain.StateData, error) {

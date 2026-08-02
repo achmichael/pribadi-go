@@ -394,6 +394,37 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 
 	sessionID := "default" // TODO: multi-session
 
+	// Intercept explicit command (Reset)
+	if strings.TrimSpace(strings.ToLower(userText)) == "/reset" {
+		o.logger.Info().Str("userID", userID).Str("sessionID", sessionID).Msg("[Orchestrator] Explicit commmand received")
+
+		// clean chat from DB
+		err = o.repo.DeleteMessagesByUserSession(ctx, userID, sessionID)
+		if err != nil {
+			o.logger.Warn().Err(err).Msg("[orchestrator] failed to delete messages from sqlite")
+		}
+
+		// Reset conversation state
+		err = o.stateManager.DeleteState(ctx, userID, sessionID)
+		if err != nil {
+			o.logger.Warn().Err(err).Msg("[orchestrator] failed to delete conversation state")
+		}
+
+		// purge user fact from qdrant
+		err = o.memory.PurgeMemory(ctx, userID)
+		if err != nil {
+			o.logger.Warn().Err(err).Msg("[orchestrator] failed to purge user fact")
+		}
+
+		// Kirim balasan ke user bahwa riwayat berhasil dihapus
+		sendErr := o.waClient.SendText(ctx, msg.SenderJID, "🧹 *Sesi Diatur Ulang*\nRiwayat percakapan dan memori sesi Anda telah berhasil dibersihkan.")
+		if sendErr != nil {
+			o.logger.Warn().Err(sendErr).Msg("[orchestrator] failed to send reset confirmation")
+		}
+
+		return sendErr
+	}
+
 	// Load Session State
 	state, err := o.stateManager.Load(ctx, userID, sessionID)
 	if err != nil {
@@ -560,14 +591,14 @@ Metadata dokumen aktif (JSON): %s`, userText, doc.MetadataJSON)
 	messages := []ollama.ChatMessage{
 		{Role: "system", Content: composed.SystemPrompt},
 	}
-	
+
 	for _, histMsg := range convHistory {
 		messages = append(messages, ollama.ChatMessage{
 			Role:    histMsg.Role,
 			Content: histMsg.Content,
 		})
 	}
-	
+
 	messages = append(messages, ollama.ChatMessage{
 		Role:    "user",
 		Content: composed.UserPrompt,
@@ -584,7 +615,7 @@ Metadata dokumen aktif (JSON): %s`, userText, doc.MetadataJSON)
 	llmDur := time.Since(llmStart)
 	if err != nil {
 		o.logger.Error().Err(err).Dur("ms", llmDur).Msg("[orchestrator] Ollama generation failed")
-		
+
 		// Log error
 		o.interactionLogger.LogError(ctx, userID, sessionID, userText, err.Error(), time.Since(handleStart).Milliseconds())
 		return err
@@ -623,12 +654,12 @@ Metadata dokumen aktif (JSON): %s`, userText, doc.MetadataJSON)
 	finalRes.Metadata.LLMInferenceMs = llmDur.Milliseconds()
 
 	// ── 10. Send Reply ──────────────────────────────────────────────
-	sendErr := o.waClient.SendText(ctx, msg.SenderJID, finalRes.Text)
+	sendTextErr := o.waClient.SendText(ctx, msg.SenderJID, finalRes.Text)
 
 	// ── 11. Async Post-processing ───────────────────────────────────
 	// Note: We use background context for async work to not be cancelled if request context ends
 	bgCtx := context.Background()
-	
+
 	// 1. Persist Raw Messages
 	o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
 		UserID:        userID,
@@ -697,11 +728,11 @@ Metadata dokumen aktif (JSON): %s`, userText, doc.MetadataJSON)
 			Response:    finalRes.Text,
 			Metadata:    metaMap,
 			Duration:    finalRes.Metadata.TotalDurationMs,
-			Success:     sendErr == nil,
+			Success:     sendTextErr == nil,
 		})
 	}()
 
-	return sendErr
+	return sendTextErr
 }
 
 // estimateTokens rough word-based token count.
@@ -712,4 +743,3 @@ func estimateTokens(s string) int {
 	}
 	return int(float64(words) * 1.3)
 }
-
