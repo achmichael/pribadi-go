@@ -19,6 +19,8 @@ type PromptContext struct {
 // RetrievalService handles semantic search
 type RetrievalService interface {
 	Retrieve(ctx context.Context, question string, targetDocID string) (PromptContext, error)
+	// delete chunks documents in qdrant
+	PurgeRAGDocuments(ctx context.Context, userID string) error
 }
 
 type retrievalService struct {
@@ -94,4 +96,8 @@ func (s *retrievalService) Retrieve(ctx context.Context, question string, target
 		Sources:    sources,
 		HasResults: true,
 	}, nil
+}
+
+func (s *retrievalService) PurgeRAGDocuments(ctx context.Context, userID string) error {
+	return s.vectorRepo.PurgeRAGDocuments(ctx, userID)
 }

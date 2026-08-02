@@ -149,6 +149,7 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 	}
 
 	var userText string
+	sessionID := "default" // TODO: multi-session
 
 	// ── 1. Preprocessing ──────────────────────────────────────────────
 	switch msg.MessageType {
@@ -379,6 +380,25 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 				Dur("duration_ms", time.Since(sendStart)).
 				Dur("total_ms", time.Since(handleStart)).
 				Msg("[orchestrator] WA send done (document)")
+
+			o.repo.InsertMessageV2(context.Background(), repository.InsertMessageV2Params{
+				UserID:        userID,
+				Platform:      "whatsapp",
+				PlatformMsgID: msg.ID,
+				SessionID:     sessionID,
+				Role:          "user",
+				Content:       "[Mengirim Dokumen: " + fileName + "]",
+				TokenCount:    0,
+			})
+
+			o.repo.InsertMessageV2(context.Background(), repository.InsertMessageV2Params{
+				UserID:     userID,
+				Platform:   "whatsapp",
+				SessionID:  sessionID,
+				Role:       "assistant",
+				Content:    summary, // Variabel pesan "✅ Dokumen berhasil diproses..."
+				TokenCount: 0,
+			})
 			return err
 		}
 
@@ -391,8 +411,6 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 		Int("user_text_len", len(userText)).
 		Dur("preprocess_ms", time.Since(handleStart)).
 		Msg("[orchestrator] preprocessing complete, starting retrieval + memory")
-
-	sessionID := "default" // TODO: multi-session
 
 	// Intercept explicit command (Reset)
 	if strings.TrimSpace(strings.ToLower(userText)) == "/reset" {
@@ -414,6 +432,17 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 		err = o.memory.PurgeMemory(ctx, userID)
 		if err != nil {
 			o.logger.Warn().Err(err).Msg("[orchestrator] failed to purge user fact")
+		}
+
+		// delete documents from sqlite and chunks from qdrant
+		err = o.ragRetrieve.PurgeRAGDocuments(ctx, userID)
+		if err != nil {
+			o.logger.Warn().Err(err).Msg("[orchestrator] failed to delete user documents from sqlite")
+		}
+
+		err = o.repo.DeleteAllUserDocuments(ctx, userID)
+		if err != nil {
+			o.logger.Warn().Err(err).Msg("[orchestrator] failed to purge user documents from qdrant")
 		}
 
 		// Kirim balasan ke user bahwa riwayat berhasil dihapus

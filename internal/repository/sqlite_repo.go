@@ -96,6 +96,9 @@ type Repository interface {
 	// ── New: session state ──
 	DeleteConversationState(ctx context.Context, userID, sessionID string) error
 
+	// ── New: user documents ──
+	DeleteAllUserDocuments(ctx context.Context, userID string) error
+	
 	Close() error
 }
 
@@ -837,6 +840,14 @@ func (r *sqliteRepo) DeleteMessagesByUserSession(ctx context.Context, userID, se
 
 func (r *sqliteRepo) DeleteConversationState(ctx context.Context, userID, sessionID string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM conversation_states WHERE user_id = ? AND session_id = ?", userID, sessionID)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *sqliteRepo) DeleteAllUserDocuments(ctx context.Context, userID string) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM user_documents WHERE user_id = ?", userID)
 	if err != nil {
 		return err
 	}

@@ -26,18 +26,19 @@ type SearchResult struct {
 type VectorRepository interface {
 	UpsertDocument(ctx context.Context, id string, content string, metadata map[string]string) error
 	Search(ctx context.Context, query string, topK int, filterDocID string) ([]SearchResult, error)
+	PurgeRAGDocuments(ctx context.Context, userID string) error
 	Close() error
 }
 
 // qdrantVectorRepo implements VectorRepository using Qdrant gRPC.
 type qdrantVectorRepo struct {
-	conn       *grpc.ClientConn
-	points     pb.PointsClient
+	conn        *grpc.ClientConn
+	points      pb.PointsClient
 	collections pb.CollectionsClient
-	embedder   *utils.OllamaEmbedder
-	collName   string
-	vectorSize uint64
-	logger     *zerolog.Logger
+	embedder    *utils.OllamaEmbedder
+	collName    string
+	vectorSize  uint64
+	logger      *zerolog.Logger
 }
 
 // NewVectorRepository creates a new vector repository backed by Qdrant (gRPC).
@@ -317,4 +318,45 @@ func (r *qdrantVectorRepo) Search(ctx context.Context, query string, topK int, f
 func (r *qdrantVectorRepo) Close() error {
 	r.logger.Info().Msg("[vector_repo] closing qdrant connection")
 	return r.conn.Close()
+}
+
+func (r *qdrantVectorRepo) PurgeRAGDocuments(ctx context.Context, userID string) error {
+	start := time.Now()
+	wait := true
+	// Build filter to select only this user's documents
+	filter := &pb.Filter{
+		Must: []*pb.Condition{
+			{
+				ConditionOneOf: &pb.Condition_Field{
+					Field: &pb.FieldCondition{
+						Key: "user_id",
+						Match: &pb.Match{
+							MatchValue: &pb.Match_Keyword{
+								Keyword: userID,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Delete all points matching the filter
+	deleteResp, err := r.points.Delete(ctx, &pb.DeletePoints{
+		CollectionName: r.collName,
+		Points:         &pb.PointsSelector{PointsSelectorOneOf: &pb.PointsSelector_Filter{Filter: filter}},
+		Wait:           &wait,
+	})
+	if err != nil {
+		r.logger.Error().Err(err).Str("user_id", userID).Dur("total_ms", time.Since(start)).Msg("[vector_repo] delete failed")
+		return fmt.Errorf("delete points: %w", err)
+	}
+
+	r.logger.Info().
+		Str("user_id", userID).
+		Int64("deleted", int64(deleteResp.Result.GetOperationId())).
+		Dur("total_ms", time.Since(start)).
+		Msg("[vector_repo] purge complete")
+
+	return nil
 }
