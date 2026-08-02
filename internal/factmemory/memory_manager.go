@@ -62,7 +62,7 @@ const (
 	collectionName           = "user_facts"
 	vectorSize               = 768 // nomic-embed-text
 	prefetchTopK             = 5
-	prefetchMinScore float32 = 0.8
+	prefetchMinScore float32 = 0.6
 	dedupThreshold   float32 = 0.92 // cosine similarity above this = duplicate
 	workerCount              = 2
 	channelCap               = 50
@@ -140,7 +140,7 @@ func NewMemoryManager(
 func (m *manager) PrefetchRelevant(ctx context.Context, userID string, currentMessage string) (string, error) {
 	start := time.Now()
 
-	embedding, err := m.embedder.Embed(ctx, currentMessage)
+	embedding, err := m.embedder.Embed(ctx, "search_query: "+currentMessage)
 	if err != nil {
 		return "", fmt.Errorf("embed query: %w", err)
 	}
@@ -186,8 +186,7 @@ func (m *manager) PrefetchRelevant(ctx context.Context, userID string, currentMe
 
 	// Build context block
 	var sb strings.Builder
-	sb.WriteString("[SYSTEM NOTE: Berikut adalah fakta/memori tentang pengguna dari percakapan sebelumnya. JANGAN SEBUTKAN ATAU UNGKIT fakta-fakta ini dalam jawaban Anda KECUALI pengguna menanyakannya secara langsung atau jika sangat relevan dengan inti pertanyaan. Jangan jadikan fakta ini sebagai kalimat pembuka.]\n")
-	sb.WriteString("<memory-context>\n")
+	sb.WriteString("<informasi_latar_belakang>\n")
 	for _, scored := range results {
 		factText := ""
 		category := ""
@@ -207,7 +206,7 @@ func (m *manager) PrefetchRelevant(ctx context.Context, userID string, currentMe
 			}
 		}
 	}
-	sb.WriteString("</memory-context>")
+	sb.WriteString("</informasi_latar_belakang>")
 
 	m.logger.Info().
 		Str("user_id", userID).
@@ -222,7 +221,7 @@ func (m *manager) PrefetchRelevant(ctx context.Context, userID string, currentMe
 func (m *manager) PrefetchWithScores(ctx context.Context, userID string, currentMessage string) ([]ScoredFact, error) {
 	start := time.Now()
 
-	embedding, err := m.embedder.Embed(ctx, currentMessage)
+	embedding, err := m.embedder.Embed(ctx, "search_query: "+currentMessage)
 	if err != nil {
 		return nil, fmt.Errorf("embed query: %w", err)
 	}
@@ -484,8 +483,8 @@ func (m *manager) extractFacts(ctx context.Context, userMsg, assistantMsg string
 // ─── Dedup + Store ─────────────────────────────────────────────────
 
 func (m *manager) dedupAndStore(ctx context.Context, userID string, fact extractedFact) error {
-	// 1. Embed the fact
-	embedding, err := m.embedder.Embed(ctx, fact.Fact)
+	// 1. Embed the fact with asymmetric prefix
+	embedding, err := m.embedder.Embed(ctx, "search_document: "+fact.Fact)
 	if err != nil {
 		return fmt.Errorf("embed fact: %w", err)
 	}

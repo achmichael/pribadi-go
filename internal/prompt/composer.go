@@ -167,12 +167,7 @@ func (c *composer) enhanceWithClassification(sysPrompt string, class *classifier
 		additions = append(additions, "Pengguna meminta klarifikasi. Jelaskan dengan lebih detail dan jelas.")
 		additions = append(additions, "--- END KLARIFIKASI ---\n")
 		
-	case classifier.IntentContinueTask:
-		additions = append(additions, "\n--- LANJUTAN TUGAS ---")
-		additions = append(additions, "Ini adalah kelanjutan dari tugas sebelumnya. Lanjutkan dari konteks yang sudah ada.")
-		additions = append(additions, "--- END LANJUTAN ---\n")
 	}
-	
 	if class.RequiresClarify {
 		additions = append(additions, "\n--- PERINGATAN AMBIGUITAS ---")
 		additions = append(additions, "Pertanyaan pengguna mungkin ambigu. Jika tidak yakin, minta klarifikasi sebelum menjawab.")

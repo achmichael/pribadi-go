@@ -15,9 +15,10 @@ const maxContextChars = 4000
 
 // Persona holds agent identity fetched from dashboard config.
 type Persona struct {
-	Name        string
-	Description string
-	Tone        string
+	Name            string
+	Description     string
+	Tone            string
+	VoiceGuidelines string
 }
 
 // SessionContext holds all dynamic context for a single turn.
@@ -90,9 +91,6 @@ func (b *Builder) buildFromTemplate(sc SessionContext) string {
 	} else {
 		sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", "")
 	}
-
-	// Document metadata
-	sysPrompt = strings.ReplaceAll(sysPrompt, "{{active_document_metadata}}", "(Tidak ada dokumen aktif)")
 
 	// RAG
 	if sc.HasRAG {
@@ -246,11 +244,18 @@ func (b *Builder) behavioralRules(sc SessionContext) string {
 	sb.WriteString("4. JANGAN PERNAH mengarang informasi pribadi pengguna yang tidak pernah disebutkan.\n")
 	sb.WriteString("5. Jika tidak tahu jawabannya, katakan tidak tahu. Jangan menebak.\n")
 	sb.WriteString("6. Jika pengguna mengoreksi Anda, terima koreksi dan jangan ulangi kesalahan yang sama.\n")
-	sb.WriteString("7. Jaga konsistensi dengan jawaban-jawaban sebelumnya dalam percakapan ini.\n")
+	sb.WriteString("7. Jika pengguna menanyakan sesuatu tentang DIRINYA SENDIRI (nama, preferensi, dsb) dan informasi tersebut TIDAK ADA di <informasi_latar_belakang> atau User Preferences, JAWAB dengan natural: sampaikan bahwa Anda belum punya info tersebut, dan tawarkan agar pengguna memberitahu supaya Anda ingat. JANGAN gunakan bahasa penolakan/disclaimer privasi seperti 'saya tidak bisa membantu mencari informasi tentang Anda' — Anda BUKAN menolak, Anda hanya belum tahu.\n")
+
+	// Voice Guidelines
+	if sc.Persona.VoiceGuidelines != "" {
+		sb.WriteString("8. Pedoman Gaya Bahasa (Voice Guidelines):\n")
+		sb.WriteString(sc.Persona.VoiceGuidelines)
+		sb.WriteString("\n")
+	}
 
 	// Custom directives from user
 	if sc.State != nil && len(sc.State.CustomDirectives) > 0 {
-		sb.WriteString("8. Instruksi khusus dari pengguna:\n")
+		sb.WriteString("9. Instruksi khusus dari pengguna:\n")
 		i := 0
 		for k, v := range sc.State.CustomDirectives {
 			sb.WriteString(fmt.Sprintf("   - %s: %s\n", k, v))
@@ -260,7 +265,7 @@ func (b *Builder) behavioralRules(sc SessionContext) string {
 
 	// User display name
 	if sc.State != nil && sc.State.UserDisplayName != "" {
-		sb.WriteString(fmt.Sprintf("9. Nama pengguna adalah '%s' (Gunakan secara natural jika perlu, tidak perlu selalu disebutkan).\n", sc.State.UserDisplayName))
+		sb.WriteString(fmt.Sprintf("10. Nama pengguna adalah '%s' (Gunakan secara natural jika perlu, tidak perlu selalu disebutkan).\n", sc.State.UserDisplayName))
 	}
 
 	return sb.String()

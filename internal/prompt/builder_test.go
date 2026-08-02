@@ -66,7 +66,7 @@ func TestBuild_DocumentIsolation(t *testing.T) {
 
 	result := b.Build(sc)
 
-	if !strings.Contains(result, "ISOLASI KONTEKS DOKUMEN") {
+	if !strings.Contains(result, "ATURAN PENGGUNAAN KONTEKS DOKUMEN") {
 		t.Error("expected document isolation rules")
 	}
 	if !strings.Contains(result, "doc-123") {

@@ -212,11 +212,8 @@ func TestComposer_WithConversationHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.UserPrompt, "Recent Conversation History") {
-		t.Error("expected history in user prompt")
-	}
-	if !strings.Contains(result.UserPrompt, "Hello") {
-		t.Error("expected history content in user prompt")
+	if result.UserPrompt != "Continue from before" {
+		t.Error("expected user prompt to be unchanged")
 	}
 	if !result.IncludedHistory {
 		t.Error("expected IncludedHistory=true")

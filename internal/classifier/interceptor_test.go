@@ -34,7 +34,7 @@ func TestInterceptor_PreferenceUpdate(t *testing.T) {
 
 	sm := conversation.NewStateManager(repo, &logger)
 	pm := conversation.NewPreferenceManager(repo, &logger)
-	ic := NewInterceptor(sm, pm, &logger)
+	ic := NewInterceptor(sm, pm, &logger, nil, nil)
 
 	// Create test user
 	repo.CreateUser(context.Background(), "user-i1", "test")
@@ -93,7 +93,7 @@ func TestInterceptor_CorrectionNotIntercepted(t *testing.T) {
 
 	sm := conversation.NewStateManager(repo, &logger)
 	pm := conversation.NewPreferenceManager(repo, &logger)
-	ic := NewInterceptor(sm, pm, &logger)
+	ic := NewInterceptor(sm, pm, &logger, nil, nil)
 
 	repo.CreateUser(context.Background(), "user-i2", "test")
 
@@ -133,7 +133,7 @@ func TestInterceptor_NilClass(t *testing.T) {
 
 	sm := conversation.NewStateManager(repo, &logger)
 	pm := conversation.NewPreferenceManager(repo, &logger)
-	ic := NewInterceptor(sm, pm, &logger)
+	ic := NewInterceptor(sm, pm, &logger, nil, nil)
 
 	intercepted, _, err := ic.Process(context.Background(), InterceptParams{
 		Class: nil,
@@ -153,7 +153,7 @@ func TestInterceptor_NormalQuestionNotIntercepted(t *testing.T) {
 
 	sm := conversation.NewStateManager(repo, &logger)
 	pm := conversation.NewPreferenceManager(repo, &logger)
-	ic := NewInterceptor(sm, pm, &logger)
+	ic := NewInterceptor(sm, pm, &logger, nil, nil)
 
 	class := &Classification{
 		MessageClass: ClassQuestion,

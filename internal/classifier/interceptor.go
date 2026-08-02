@@ -2,11 +2,15 @@ package classifier
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/achmichael/pribadi-go/internal/conversation"
 	"github.com/achmichael/pribadi-go/internal/domain"
+	"github.com/achmichael/pribadi-go/internal/repository"
+	"github.com/achmichael/pribadi-go/pkg/ollama"
 	"github.com/rs/zerolog"
 )
 
@@ -38,6 +42,8 @@ type interceptor struct {
 	stateManager conversation.StateManager
 	prefManager  conversation.PreferenceManager
 	logger       *zerolog.Logger
+	llm          *ollama.OllamaClient
+	dashRepo     repository.DashboardRepository
 }
 
 // NewInterceptor creates an Interceptor.
@@ -45,11 +51,15 @@ func NewInterceptor(
 	stateManager conversation.StateManager,
 	prefManager conversation.PreferenceManager,
 	logger *zerolog.Logger,
+	llm *ollama.OllamaClient,
+	dashRepo repository.DashboardRepository,
 ) Interceptor {
 	return &interceptor{
 		stateManager: stateManager,
 		prefManager:  prefManager,
 		logger:       logger,
+		llm:          llm,
+		dashRepo:     dashRepo,
 	}
 }
 
@@ -155,10 +165,63 @@ func (i *interceptor) applyPreferences(ctx context.Context, params InterceptPara
 	if len(ackParts) == 0 {
 		return "✅", nil
 	}
+	
+	// Generate natural acknowledgement using LLM
+	ackMsg := i.generateLLMAck(ctx, params.UserText, ackParts)
+	if ackMsg != "" {
+		return ackMsg, nil
+	}
+
 	if len(ackParts) == 1 {
 		return "✅ " + ackParts[0], nil
 	}
 	return "✅ " + joinAcks(ackParts), nil
+}
+
+func (i *interceptor) generateLLMAck(ctx context.Context, userText string, ackParts []string) string {
+	if i.llm == nil {
+		return ""
+	}
+
+	personaName := "Assistant"
+	personaDesc := "Saya adalah asisten AI yang cerdas dan efisien."
+	voiceGuide := "Gunakan bahasa natural dan hangat, TAPI tidak berlebihan. Jangan gunakan filler exclamation di awal kalimat kecuali relevan."
+	
+	if i.dashRepo != nil {
+		if conf, err := i.dashRepo.GetAgentConfigByKey(ctx, "persona_name"); err == nil && conf != nil {
+			json.Unmarshal([]byte(conf.ValueJSON), &personaName)
+		}
+		if conf, err := i.dashRepo.GetAgentConfigByKey(ctx, "persona_description"); err == nil && conf != nil {
+			json.Unmarshal([]byte(conf.ValueJSON), &personaDesc)
+		}
+		if conf, err := i.dashRepo.GetAgentConfigByKey(ctx, "voice_guidelines"); err == nil && conf != nil {
+			json.Unmarshal([]byte(conf.ValueJSON), &voiceGuide)
+		}
+	}
+
+	systemPrompt := fmt.Sprintf(`ANDA ADALAH: %s
+%s
+Pedoman Gaya Bahasa:
+%s
+
+TUGAS ANDA:
+Pengguna baru saja memberikan instruksi atau informasi pribadi. Sistem telah mencatat perubahan berikut:
+%s
+
+Berikan respons SINGKAT (maksimal 1-2 kalimat) untuk mengonfirmasi bahwa Anda telah mengingat informasi tersebut. 
+Berespons secara natural dan hangat sesuai pedoman gaya bahasa Anda. Jangan mengulangi format sistem (jangan gunakan bullet point atau tanda panah). Langsung berikan balasan percakapan.`, personaName, personaDesc, voiceGuide, joinAcks(ackParts))
+
+	messages := []ollama.ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userText},
+	}
+	
+	reply, err := i.llm.Chat(ctx, messages)
+	if err != nil {
+		i.logger.Warn().Err(err).Msg("[interceptor] failed to generate LLM ack, falling back to static")
+		return ""
+	}
+	return strings.TrimSpace(reply)
 }
 
 // handleCorrection marks correction in state.

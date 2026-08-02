@@ -207,9 +207,10 @@ func (b *builder) Build(ctx context.Context, params BuildParams) (*prompt.Sessio
 
 func (b *builder) loadPersona(ctx context.Context) prompt.Persona {
 	p := prompt.Persona{
-		Name:        "Assistant",
-		Description: "Saya adalah asisten AI yang cerdas dan efisien.",
-		Tone:        "casual",
+		Name:            "Assistant",
+		Description:     "Saya adalah asisten AI yang cerdas dan efisien.",
+		Tone:            "casual",
+		VoiceGuidelines: "Gunakan bahasa natural dan hangat, TAPI tidak berlebihan (hindari \"Haha!\", \"Asyik!\", \"Wah keren!\" di setiap respons — pakai ekspresi seperti itu HANYA jika konteksnya memang lucu/santai).\nJangan campur gaya formal dan informal dalam satu respons.\nDefaultnya: percakapan seperti asisten yang kompeten dan ramah, bukan hype-man.\nJangan gunakan filler exclamation di awal kalimat kecuali relevan dengan isi pesan user.",
 	}
 
 	if conf, err := b.dashRepo.GetAgentConfigByKey(ctx, "persona_name"); err == nil && conf != nil {
@@ -220,6 +221,9 @@ func (b *builder) loadPersona(ctx context.Context) prompt.Persona {
 	}
 	if conf, err := b.dashRepo.GetAgentConfigByKey(ctx, "tone_preference"); err == nil && conf != nil {
 		json.Unmarshal([]byte(conf.ValueJSON), &p.Tone)
+	}
+	if conf, err := b.dashRepo.GetAgentConfigByKey(ctx, "voice_guidelines"); err == nil && conf != nil {
+		json.Unmarshal([]byte(conf.ValueJSON), &p.VoiceGuidelines)
 	}
 
 	return p
