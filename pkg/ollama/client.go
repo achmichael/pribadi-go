@@ -61,7 +61,7 @@ func NewClient(baseURL, model string, logger *zerolog.Logger) *OllamaClient {
 }
 
 // MaxPromptTokens is the soft cap for total prompt tokens sent to Chat.
-const MaxPromptTokens = 2048
+const MaxPromptTokens = 8192
 
 // estimateTokens rough count: words * 1.3
 func estimateTokens(messages []ChatMessage) int {
@@ -140,7 +140,7 @@ func (c *OllamaClient) doChat(ctx context.Context, messages []ChatMessage, forma
 		Options: map[string]any{
 			"num_predict": 800,  // increased to allow full JSON abstract extraction
 			"temperature": 0.7,
-			"num_ctx":     2048, // limit context window for speed
+			"num_ctx":     8192, // limit context window for speed
 		},
 		KeepAlive: "30m", // keep model loaded 30 min
 	}

@@ -483,20 +483,17 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 					contextualizePrompt := fmt.Sprintf(`ANDA ADALAH: QUERY CONTEXTUALIZATION AGENT untuk sistem RAG multilingual.
 
 KONTEKS:
-Sistem ini menyimpan dokumen yang isinya bisa berbahasa apa saja (Inggris, Indonesia, dll), namun pengguna bisa bertanya dalam bahasa apa saja juga. Embedding model yang dipakai (nomic-embed-text) memiliki kemampuan cross-lingual retrieval yang lemah — artinya query Bahasa Indonesia kemungkinan tidak akan menemukan chunk relevan yang ditulis dalam Bahasa Inggris, dan sebaliknya.
+Sistem ini menyimpan dokumen yang isinya bisa berbahasa apa saja (Inggris, Indonesia, dll). 
+Pengguna sedang memberikan query: "%s"
 
 TUGAS ANDA:
-Anda menerima query asli dari pengguna beserta metadata dokumen aktif (jika ada, dari SQLite). Tugas Anda BUKAN menjawab pertanyaan, tetapi menghasilkan SATU query pencarian semantik yang dioptimalkan untuk retrieval, dengan ATURAN:
+Anda menerima query asli dari pengguna beserta metadata dokumen aktif (jika ada). Tugas Anda BUKAN menjawab pertanyaan, tetapi menghasilkan SATU query pencarian semantik yang dioptimalkan untuk vector retrieval (RAG), dengan ATURAN KETAT:
 
-1. Deteksi bahasa asli query pengguna.
-2. Jika tersedia metadata dokumen aktif (title, keywords, abstract) dan bahasa metadata tersebut BERBEDA dari bahasa query pengguna, gabungkan inti pertanyaan pengguna dengan istilah-istilah kunci (entity/topik) dari metadata tersebut ke dalam query akhir — agar query memiliki representasi leksikal di KEDUA bahasa.
-3. JANGAN menerjemahkan seluruh kalimat pengguna secara kaku. Cukup perkaya query dengan istilah kunci yang relevan dari metadata dokumen, dalam bahasa aslinya.
-4. Jika tidak ada metadata dokumen aktif yang relevan, kembalikan query asli tanpa perubahan.
-5. Output HANYA berupa query hasil akhir dalam bentuk teks polos, tanpa penjelasan, tanpa markdown.
+1. Jika pertanyaan pengguna sangat umum (misal: "apa isi dokumen tersebut?", "tolong ringkas dokumennya", "jelaskan isi file ini"), kembalikan SAJA query asli tersebut ("apa isi dari dokumen tersebut?") TANPA tambahan kata-kata lain. JANGAN mengarang kata kunci dari metadata jika tidak diminta!
+2. Hanya lakukan penambahan istilah spesifik dari metadata jika pengguna menanyakan sesuatu yang sangat butuh penyeimbang bahasa (misal terjemahan).
+3. Output HANYA berupa query hasil akhir dalam bentuk teks polos, tanpa prefix "Query pencarian semantik:", tanpa penjelasan, tanpa markdown. JANGAN MENGARANG!
 
-INPUT:
-Query pengguna: "%s"
-Metadata dokumen aktif (JSON): %s`, userText, doc.MetadataJSON)
+INPUT METADATA: %s`, userText, doc.MetadataJSON)
 
 					ctxMsgs := []ollama.ChatMessage{{Role: "user", Content: contextualizePrompt}}
 					enrichedQuery, errCtx := o.ollama.Chat(ctx, ctxMsgs)
@@ -562,8 +559,46 @@ Metadata dokumen aktif (JSON): %s`, userText, doc.MetadataJSON)
 		if intercepted {
 			o.logger.Info().Str("msg_id", msg.ID).Msg("[orchestrator] request intercepted (e.g. preference update)")
 			sendErr := o.waClient.SendText(ctx, msg.SenderJID, ackMsg)
-			// Trigger state update anyway for the preference set
-			o.responseProcessor.UpdateState(ctx, userID, sessionID, classResult)
+			
+			bgCtx := context.Background()
+			
+			// 1. Persist to history so the LLM knows what happened
+			o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
+				UserID:        userID,
+				Platform:      "whatsapp",
+				PlatformMsgID: msg.ID,
+				SessionID:     sessionID,
+				Role:          "user",
+				Content:       userText,
+				TokenCount:    estimateTokens(userText),
+			})
+			o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
+				UserID:     userID,
+				Platform:   "whatsapp",
+				SessionID:  sessionID,
+				Role:       "assistant",
+				Content:    ackMsg,
+				TokenCount: estimateTokens(ackMsg),
+			})
+			
+			// 2. State update
+			o.responseProcessor.UpdateState(bgCtx, userID, sessionID, classResult)
+			
+			// 3. Trigger memory sync so facts are extracted
+			o.responseProcessor.TriggerMemorySync(userID, userText, ackMsg)
+			
+			// 4. Log interaction
+			o.interactionLogger.Log(bgCtx, response.InteractionLog{
+				UserID:      userID,
+				SessionID:   sessionID,
+				Timestamp:   time.Now(),
+				UserMessage: userText,
+				Response:    ackMsg,
+				Metadata:    map[string]interface{}{"intercepted": true},
+				Duration:    time.Since(handleStart).Milliseconds(),
+				Success:     sendErr == nil,
+			})
+
 			return sendErr
 		}
 	}

@@ -165,8 +165,9 @@ func (b *Builder) buildDocumentIsolatedPrompt(sc SessionContext) string {
 	sb.WriteString(sc.MetadataBlock)
 	sb.WriteString("\n")
 	sb.WriteString("2. JIKA pengguna menanyakan informasi yang spesifik mengenai isi dokumen ini, jawablah BERDASARKAN potongan teks (chunks) di bawah ini. JANGAN mengarang informasi yang tidak ada di dalam chunk dokumen.\n\n")
-	sb.WriteString("3. JIKA pengguna menanyakan pertanyaan umum (general knowledge) atau di luar konteks dokumen, JAWABLAH secara natural menggunakan pengetahuan umum Anda yang luas (seperti ChatGPT/Gemini/Claude). Anda TIDAK dibatasi hanya pada dokumen untuk pertanyaan umum. Namun, jika ada kaitan yang menarik dengan dokumen aktif, Anda boleh menyebutkannya secara sekilas.\n\n")
-	sb.WriteString(fmt.Sprintf("4. Jika pengguna secara spesifik merujuk pada dokumen lain (document_id berbeda dari %s), beri tahu mereka bahwa dokumen yang sedang aktif saat ini adalah dokumen ini.\n\n", sc.TargetDocID))
+	sb.WriteString("3. DILARANG KERAS mengucapkan 'Maaf saya hanya menerima teks dan tidak dapat membaca dokumen', 'Saya tidak bisa melihat dokumen', dsb. Anda SUDAH BISA membaca dokumen melalui konteks teks yang disuntikkan oleh sistem di bawah ini. Bertindaklah seolah Anda membaca dokumen tersebut secara langsung.\n\n")
+	sb.WriteString("4. JIKA pengguna menanyakan pertanyaan umum (general knowledge) atau di luar konteks dokumen, JAWABLAH secara natural menggunakan pengetahuan umum Anda yang luas (seperti ChatGPT/Gemini/Claude). Anda TIDAK dibatasi hanya pada dokumen untuk pertanyaan umum. Namun, jika ada kaitan yang menarik dengan dokumen aktif, Anda boleh menyebutkannya secara sekilas.\n\n")
+	sb.WriteString(fmt.Sprintf("5. Jika pengguna secara spesifik merujuk pada dokumen lain (document_id berbeda dari %s), beri tahu mereka bahwa dokumen yang sedang aktif saat ini adalah dokumen ini.\n\n", sc.TargetDocID))
 
 	sb.WriteString("KONTEN UNTUK DIJAWAB:\n")
 	if sc.HasRAG {
