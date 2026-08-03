@@ -240,22 +240,21 @@ func (b *Builder) behavioralRules(sc SessionContext) string {
 		sb.WriteString("3. Jelaskan jawaban dalam langkah-langkah bernomor.\n")
 	}
 
-	// Truthfulness & consistency (Principles 7, 9, 11, 17)
-	sb.WriteString("4. JANGAN PERNAH mengarang informasi pribadi pengguna yang tidak pernah disebutkan.\n")
-	sb.WriteString("5. Jika tidak tahu jawabannya, katakan tidak tahu. Jangan menebak.\n")
-	sb.WriteString("6. Jika pengguna mengoreksi Anda, terima koreksi dan jangan ulangi kesalahan yang sama.\n")
-	sb.WriteString("7. Jika pengguna menanyakan sesuatu tentang DIRINYA SENDIRI (nama, preferensi, dsb) dan informasi tersebut TIDAK ADA di <informasi_latar_belakang> atau User Preferences, JAWAB dengan natural: sampaikan bahwa Anda belum punya info tersebut, dan tawarkan agar pengguna memberitahu supaya Anda ingat. JANGAN gunakan bahasa penolakan/disclaimer privasi seperti 'saya tidak bisa membantu mencari informasi tentang Anda' — Anda BUKAN menolak, Anda hanya belum tahu.\n")
+	sb.WriteString("4. Bersikaplah seperti asisten AI cerdas dan natural. Jawab obrolan secara luwes, dan jawab pertanyaan teknis secara informatif.\n")
+	sb.WriteString("5. Gunakan SEMUA konteks yang tersedia (Sejarah Percakapan, Memori, Fakta, Dokumen) secara mulus. Jangan pernah mendikte bahwa informasi tersebut berasal dari 'database', 'sejarah', atau 'memori'.\n")
+	sb.WriteString("6. JANGAN mengarang informasi pribadi pengguna (halusinasi). Jika pengguna membagikan fakta (misal: kuliah/kerja di mana), cukup tanggapi obrolannya secara empatik tanpa mengatakan bahwa Anda akan 'mengingat' info tersebut.\n")
+	sb.WriteString("7. Jika pengguna menanyakan sesuatu tentang diri mereka sendiri dan Anda benar-benar tidak memilikinya di *seluruh* konteks, jawab dengan jujur bahwa Anda belum tahu tanpa menggunakan bahasa penolakan sistem (seperti 'Saya AI, saya tidak punya akses').\n")
 
 	// Voice Guidelines
 	if sc.Persona.VoiceGuidelines != "" {
-		sb.WriteString("8. Pedoman Gaya Bahasa (Voice Guidelines):\n")
+		sb.WriteString("9. Pedoman Gaya Bahasa (Voice Guidelines):\n")
 		sb.WriteString(sc.Persona.VoiceGuidelines)
 		sb.WriteString("\n")
 	}
 
 	// Custom directives from user
 	if sc.State != nil && len(sc.State.CustomDirectives) > 0 {
-		sb.WriteString("9. Instruksi khusus dari pengguna:\n")
+		sb.WriteString("10. Instruksi khusus dari pengguna:\n")
 		i := 0
 		for k, v := range sc.State.CustomDirectives {
 			sb.WriteString(fmt.Sprintf("   - %s: %s\n", k, v))
@@ -265,7 +264,7 @@ func (b *Builder) behavioralRules(sc SessionContext) string {
 
 	// User display name
 	if sc.State != nil && sc.State.UserDisplayName != "" {
-		sb.WriteString(fmt.Sprintf("10. Nama pengguna adalah '%s' (Gunakan secara natural jika perlu, tidak perlu selalu disebutkan).\n", sc.State.UserDisplayName))
+		sb.WriteString(fmt.Sprintf("11. Anda sedang berbicara dengan '%s'. Panggil dia dengan namanya sesekali saja secara natural, JANGAN sebut namanya di awal setiap balasan.\n", sc.State.UserDisplayName))
 	}
 
 	return sb.String()

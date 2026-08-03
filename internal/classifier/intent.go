@@ -273,6 +273,9 @@ func (c *intentClassifier) heuristicClassify(params ClassifyParams) *Classificat
 		if strings.Contains(text, p) {
 			idx := strings.Index(text, p)
 			name := strings.TrimSpace(text[idx+len(p):])
+			if strings.HasPrefix(name, "adalah ") {
+				name = strings.TrimSpace(name[7:])
+			}
 			// Clean trailing punctuation
 			name = strings.TrimRight(name, ".,!?;:")
 			if name != "" {
