@@ -72,15 +72,6 @@ func estimateTokens(messages []ChatMessage) int {
 	return int(float64(total) * 1.3)
 }
 
-// truncateToWordLimit trims content to approximately maxWords words.
-func truncateToWordLimit(s string, maxWords int) string {
-	words := strings.Fields(s)
-	if len(words) <= maxWords {
-		return s
-	}
-	return strings.Join(words[:maxWords], " ") + " [truncated]"
-}
-
 // Warmup preloads the chat model into Ollama memory.
 func (c *OllamaClient) Warmup(ctx context.Context) error {
 	_, err := c.Chat(ctx, []ChatMessage{
@@ -105,32 +96,6 @@ func (c *OllamaClient) doChat(ctx context.Context, messages []ChatMessage, forma
 		Int("token_estimate", tokenEst).
 		Str("model", c.model).
 		Msg("[ollama] chat request preparing")
-
-	// Guard: if prompt too large, truncate the longest message
-	if tokenEst > MaxPromptTokens {
-		maxIdx := 0
-		maxLen := 0
-		for i, m := range messages {
-			wc := len(strings.Fields(m.Content))
-			if wc > maxLen {
-				maxLen = wc
-				maxIdx = i
-			}
-		}
-		excess := tokenEst - MaxPromptTokens
-		excessWords := int(float64(excess)/1.3) + 10
-		targetWords := maxLen - excessWords
-		if targetWords < 50 {
-			targetWords = 50
-		}
-		messages[maxIdx].Content = truncateToWordLimit(messages[maxIdx].Content, targetWords)
-		newEst := estimateTokens(messages)
-		c.logger.Warn().
-			Int("original_tokens", tokenEst).
-			Int("truncated_tokens", newEst).
-			Int("truncated_role_idx", maxIdx).
-			Msg("[ollama] prompt truncated to fit MaxPromptTokens")
-	}
 
 	reqBody := chatRequest{
 		Model:    c.model,

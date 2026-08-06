@@ -11,7 +11,7 @@ import (
 )
 
 // maxContextChars caps RAG context injected into prompt.
-const maxContextChars = 4000
+const maxContextChars = 2000
 
 // Persona holds agent identity fetched from dashboard config.
 type Persona struct {
