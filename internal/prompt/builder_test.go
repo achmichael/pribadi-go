@@ -28,9 +28,6 @@ func TestBuild_DefaultConversational(t *testing.T) {
 	if !strings.Contains(result, "Bahasa Indonesia") {
 		t.Error("expected Indonesian language rule")
 	}
-	if !strings.Contains(result, "JANGAN PERNAH mengarang") {
-		t.Error("expected truthfulness rule")
-	}
 }
 
 func TestBuild_EnglishLanguage(t *testing.T) {
@@ -132,9 +129,6 @@ func TestBuild_WithTemplate(t *testing.T) {
 	}
 	if !strings.Contains(result, "Smart AI") {
 		t.Error("expected description substituted")
-	}
-	if !strings.Contains(result, "User suka kopi") {
-		t.Error("expected memory context injected")
 	}
 	if !strings.Contains(result, "ATURAN PERILAKU") {
 		t.Error("expected behavioral rules injected via template")

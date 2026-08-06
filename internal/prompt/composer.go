@@ -91,17 +91,7 @@ func (c *composer) Compose(ctx context.Context, params ComposeParams) (*Composed
 	// Build base system prompt
 	systemPrompt := c.builder.Build(*sc)
 	
-	// Enhance with classification-specific directives
-	if params.Classification != nil {
-		systemPrompt = c.enhanceWithClassification(systemPrompt, params.Classification)
-	}
-	
-	// Enhance with plan-specific instructions
-	if params.Plan != nil {
-		systemPrompt = c.enhanceWithPlan(systemPrompt, params.Plan)
-	}
-	
-	// Build user prompt with history if needed
+	// Build user prompt with history and dynamic instructions
 	userPrompt := c.buildUserPrompt(params)
 	
 	result := &ComposedPrompt{
@@ -151,71 +141,110 @@ func (c *composer) applyPlanFilters(sc *SessionContext, plan *planner.Plan) *Ses
 	return &filtered
 }
 
-// enhanceWithClassification adds classification-aware directives.
-func (c *composer) enhanceWithClassification(sysPrompt string, class *classifier.Classification) string {
+// getClassificationDirectives returns classification-aware directives as a block.
+func (c *composer) getClassificationDirectives(class *classifier.Classification) string {
+	if class == nil {
+		return ""
+	}
 	var additions []string
 	
 	switch class.Intent {
 	case classifier.IntentCorrect:
-		additions = append(additions, "\n--- KOREKSI PENGGUNA ---")
-		additions = append(additions, "Pengguna mengoreksi informasi sebelumnya. Terima koreksi dan update pemahaman Anda.")
-		additions = append(additions, "Jangan ulangi kesalahan yang sama.")
-		additions = append(additions, "--- END KOREKSI ---\n")
-		
+		additions = append(additions, "<instruction> context: pengguna mengoreksi informasi sebelumnya. update pemahaman, jangan ulangi kesalahan. </instruction>")
 	case classifier.IntentClarify:
-		additions = append(additions, "\n--- KLARIFIKASI ---")
-		additions = append(additions, "Pengguna meminta klarifikasi. Jelaskan dengan lebih detail dan jelas.")
-		additions = append(additions, "--- END KLARIFIKASI ---\n")
-		
+		additions = append(additions, "<instruction> context: pengguna meminta klarifikasi. jelaskan lebih detail. </instruction>")
 	}
 	if class.RequiresClarify {
-		additions = append(additions, "\n--- PERINGATAN AMBIGUITAS ---")
-		additions = append(additions, "Pertanyaan pengguna mungkin ambigu. Jika tidak yakin, minta klarifikasi sebelum menjawab.")
-		additions = append(additions, "--- END PERINGATAN ---\n")
+		additions = append(additions, "<instruction> warning: pertanyaan ambigu. minta klarifikasi jika tidak yakin. </instruction>")
 	}
 	
 	if len(additions) > 0 {
-		return sysPrompt + "\n" + strings.Join(additions, "\n")
+		return strings.Join(additions, "\n")
 	}
-	return sysPrompt
+	return ""
 }
 
-// enhanceWithPlan adds plan-aware directives.
-func (c *composer) enhanceWithPlan(sysPrompt string, plan *planner.Plan) string {
+// getPlanDirectives returns plan-aware directives as a block.
+func (c *composer) getPlanDirectives(plan *planner.Plan) string {
+	if plan == nil {
+		return ""
+	}
 	var additions []string
 	
 	switch plan.ResponseStrategy {
 	case "step_by_step":
-		additions = append(additions, "\n--- STRATEGI RESPONS ---")
-		additions = append(additions, "Jawab dengan pendekatan step-by-step. Nomori setiap langkah.")
-		additions = append(additions, "--- END STRATEGI ---\n")
-		
+		additions = append(additions, "<instruction> format: step-by-step </instruction>")
 	case "comparison":
-		additions = append(additions, "\n--- STRATEGI RESPONS ---")
-		additions = append(additions, "Jawab dengan membandingkan opsi-opsi yang ada. Jelaskan pro-kontra masing-masing.")
-		additions = append(additions, "--- END STRATEGI ---\n")
-		
+		additions = append(additions, "<instruction> format: perbandingan opsi (pro/kontra) </instruction>")
 	case "summary":
-		additions = append(additions, "\n--- STRATEGI RESPONS ---")
-		additions = append(additions, "Berikan ringkasan (summary) yang komprehensif. Fokus pada poin-poin utama.")
-		additions = append(additions, "--- END STRATEGI ---\n")
-		
+		additions = append(additions, "<instruction> format: ringkasan komprehensif </instruction>")
 	case "clarify_first":
-		additions = append(additions, "\n--- STRATEGI RESPONS ---")
-		additions = append(additions, "Tanyakan klarifikasi SEBELUM menjawab. Pertanyaan pengguna memerlukan informasi tambahan.")
-		additions = append(additions, "--- END STRATEGI ---\n")
+		additions = append(additions, "<instruction> action: tanyakan klarifikasi sebelum menjawab </instruction>")
 	}
 	
 	if plan.Reasoning != "" {
-		additions = append(additions, fmt.Sprintf("\n<!-- Internal plan reasoning: %s -->", plan.Reasoning))
+		additions = append(additions, fmt.Sprintf("<!-- Internal plan reasoning: %s -->", plan.Reasoning))
 	}
 	
 	if len(additions) > 0 {
-		return sysPrompt + "\n" + strings.Join(additions, "\n")
+		return strings.Join(additions, "\n")
 	}
-	return sysPrompt
+	return ""
 }
 
 func (c *composer) buildUserPrompt(params ComposeParams) string {
-	return params.UserText
+	var sb strings.Builder
+	sc := params.SessionContext
+
+	hasContext := false
+
+	// Inject dynamic instructions from Planner/Classifier
+	classDirs := c.getClassificationDirectives(params.Classification)
+	planDirs := c.getPlanDirectives(params.Plan)
+	
+	if classDirs != "" || planDirs != "" {
+		if classDirs != "" {
+			sb.WriteString(classDirs)
+			sb.WriteString("\n")
+		}
+		if planDirs != "" {
+			sb.WriteString(planDirs)
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	// Inject Memory Context
+	if sc != nil && sc.MemoryContext != "" {
+		if !hasContext {
+			sb.WriteString("[Konteks Referensi]:\n")
+			hasContext = true
+		}
+		sb.WriteString("Fakta Pengguna:\n")
+		sb.WriteString(sc.MemoryContext)
+		sb.WriteString("\n\n")
+	}
+
+	// Inject RAG Context
+	if sc != nil && sc.HasRAG {
+		if !hasContext {
+			sb.WriteString("[Konteks Referensi]:\n")
+			hasContext = true
+		}
+		sb.WriteString("Dokumen Relevan:\n")
+		sb.WriteString(c.builder.truncateRAG(sc.RAGContext))
+		sb.WriteString("\n")
+		if len(sc.RAGSources) > 0 {
+			sb.WriteString("Sumber: " + strings.Join(sc.RAGSources, ", ") + "\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	if hasContext {
+		sb.WriteString("[Pertanyaan Pengguna]:\n")
+	}
+	
+	sb.WriteString(params.UserText)
+
+	return sb.String()
 }

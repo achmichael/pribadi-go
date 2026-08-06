@@ -85,23 +85,13 @@ func (b *Builder) buildFromTemplate(sc SessionContext) string {
 	// Behavioral framework injection
 	sysPrompt = strings.ReplaceAll(sysPrompt, "{{behavioral_rules}}", b.behavioralRules(sc))
 
-	// Memory
-	if sc.MemoryContext != "" {
-		sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", sc.MemoryContext)
-	} else {
-		sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", "")
-	}
-
-	// RAG
-	if sc.HasRAG {
-		ragCtx := b.truncateRAG(sc.RAGContext)
-		sysPrompt = strings.ReplaceAll(sysPrompt, "{{rag_context}}", ragCtx)
-		if len(sc.RAGSources) > 0 {
-			sysPrompt += "\n\nSources: " + strings.Join(sc.RAGSources, ", ")
-		}
-	} else {
-		sysPrompt = strings.ReplaceAll(sysPrompt, "{{rag_context}}", "")
-	}
+	// Context mapping for user prompt injection later
+	// RAG and Memory moved from System to User prompt to fix Lost in the Middle.
+	// We just inject placeholders or instructions here if needed.
+	
+	// RAG placeholder removal (moved to user prompt)
+	sysPrompt = strings.ReplaceAll(sysPrompt, "{{rag_context}}", "")
+	sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", "")
 
 	return sysPrompt
 }
@@ -120,23 +110,12 @@ func (b *Builder) buildFromScratch(sc SessionContext) string {
 		sb.WriteString(rules)
 		sb.WriteString("\n\n")
 	}
+	
+	// Few-Shot Examples
+	sb.WriteString(b.fewShotExamples(sc))
+	sb.WriteString("\n")
 
-	// Memory
-	if sc.MemoryContext != "" {
-		sb.WriteString(sc.MemoryContext)
-		sb.WriteString("\n\n")
-	}
-
-	// RAG
-	if sc.HasRAG {
-		sb.WriteString("Konteks dokumen relevan:\n")
-		sb.WriteString(b.truncateRAG(sc.RAGContext))
-		sb.WriteString("\n\n")
-		if len(sc.RAGSources) > 0 {
-			sb.WriteString("Sources: " + strings.Join(sc.RAGSources, ", ") + "\n\n")
-		}
-	}
-
+	// RAG and Memory omitted here. Moved to user prompt to avoid Lost in the Middle.
 	return sb.String()
 }
 
@@ -152,27 +131,40 @@ func (b *Builder) buildDocumentIsolatedPrompt(sc SessionContext) string {
 		sb.WriteString(rules)
 		sb.WriteString("\n\n")
 	}
-
-	if sc.MemoryContext != "" {
-		sb.WriteString(sc.MemoryContext)
-		sb.WriteString("\n\n")
-	}
+	
+	// Few-Shot Examples
+	sb.WriteString(b.fewShotExamples(sc))
+	sb.WriteString("\n")
 
 	sb.WriteString("ATURAN PENGGUNAAN KONTEKS DOKUMEN:\n")
 	sb.WriteString("1. Dokumen yang SEDANG AKTIF adalah dokumen dengan metadata berikut:\n")
 	sb.WriteString(sc.MetadataBlock)
 	sb.WriteString("\n")
-	sb.WriteString("2. JIKA pengguna menanyakan informasi yang spesifik mengenai isi dokumen ini, jawablah BERDASARKAN potongan teks (chunks) di bawah ini. JANGAN mengarang informasi yang tidak ada di dalam chunk dokumen.\n\n")
-	sb.WriteString("3. DILARANG KERAS mengucapkan 'Maaf saya hanya menerima teks dan tidak dapat membaca dokumen', 'Saya tidak bisa melihat dokumen', dsb. Anda SUDAH BISA membaca dokumen melalui konteks teks yang disuntikkan oleh sistem di bawah ini. Bertindaklah seolah Anda membaca dokumen tersebut secara langsung.\n\n")
-	sb.WriteString("4. JIKA pengguna menanyakan pertanyaan umum (general knowledge) atau di luar konteks dokumen, JAWABLAH secara natural menggunakan pengetahuan umum Anda yang luas (seperti ChatGPT/Gemini/Claude). Anda TIDAK dibatasi hanya pada dokumen untuk pertanyaan umum. Namun, jika ada kaitan yang menarik dengan dokumen aktif, Anda boleh menyebutkannya secara sekilas.\n\n")
+	sb.WriteString("2. Jika pengguna menanyakan informasi spesifik mengenai isi dokumen ini, jawablah berdasarkan potongan teks (chunks) di bawah ini.\n\n")
+	sb.WriteString("3. Anda sudah memiliki kemampuan membaca dokumen melalui konteks teks di bawah ini. Bertindaklah seolah Anda membaca dokumen tersebut secara langsung.\n\n")
+	sb.WriteString("4. Jika pengguna menanyakan pertanyaan umum (general knowledge) atau di luar konteks dokumen, jawablah secara natural menggunakan pengetahuan umum Anda yang luas. Jika ada kaitan yang menarik dengan dokumen aktif, Anda boleh menyebutkannya.\n\n")
 	sb.WriteString(fmt.Sprintf("5. Jika pengguna secara spesifik merujuk pada dokumen lain (document_id berbeda dari %s), beri tahu mereka bahwa dokumen yang sedang aktif saat ini adalah dokumen ini.\n\n", sc.TargetDocID))
 
-	sb.WriteString("KONTEN UNTUK DIJAWAB:\n")
-	if sc.HasRAG {
-		sb.WriteString(b.truncateRAG(sc.RAGContext))
-	} else {
-		sb.WriteString("(Tidak ada chunk yang ditemukan)")
-	}
+	// RAG omitted here, moved to User Prompt.
+	sb.WriteString("Silakan merujuk pada konteks dokumen yang dilampirkan bersama pertanyaan pengguna.\n")
+	
+	return sb.String()
+}
+
+// fewShotExamples returns dynamic examples to set tone and behavior.
+func (b *Builder) fewShotExamples(sc SessionContext) string {
+	var sb strings.Builder
+	sb.WriteString("CONTOH PERCAKAPAN (Untuk referensi gaya bahasa):\n")
+	
+	// Default casual Indonesian examples
+	sb.WriteString("User: bro lu bisa code go ga?\n")
+	sb.WriteString("Assistant: Bisa dong! Mau bikin apa pake Go? API, CLI, atau mikorservis nih?\n\n")
+	
+	sb.WriteString("User: tolong jelasin apa itu docker\n")
+	sb.WriteString("Assistant: Gampangnya, Docker itu kayak kontainer pengiriman tapi buat software. Daripada ribet mikirin OS beda-beda, code lu dibungkus di satu kotak (container) bareng semua yang dibutuhin, jadi pasti jalan di mana aja.\n\n")
+	
+	sb.WriteString("User: nama gw budi\n")
+	sb.WriteString("Assistant: Oke, salam kenal Budi! Ada yang bisa dibantu hari ini?\n\n")
 
 	return sb.String()
 }
@@ -201,7 +193,7 @@ func (b *Builder) truncateRAG(ragCtx string) string {
 func (b *Builder) behavioralRules(sc SessionContext) string {
 	var sb strings.Builder
 
-	sb.WriteString("ATURAN PERILAKU (WAJIB DIPATUHI):\n")
+	sb.WriteString("ATURAN PERILAKU:\n")
 
 	// Language
 	lang := "Bahasa Indonesia"
@@ -241,9 +233,9 @@ func (b *Builder) behavioralRules(sc SessionContext) string {
 	}
 
 	sb.WriteString("4. Bersikaplah seperti asisten AI cerdas dan natural. Jawab obrolan secara luwes, dan jawab pertanyaan teknis secara informatif.\n")
-	sb.WriteString("5. Gunakan SEMUA konteks yang tersedia (Sejarah Percakapan, Memori, Fakta, Dokumen) secara mulus. Jangan pernah mendikte bahwa informasi tersebut berasal dari 'database', 'sejarah', atau 'memori'.\n")
-	sb.WriteString("6. JANGAN mengarang informasi pribadi pengguna (halusinasi). Jika pengguna membagikan fakta (misal: kuliah/kerja di mana), cukup tanggapi obrolannya secara empatik tanpa mengatakan bahwa Anda akan 'mengingat' info tersebut.\n")
-	sb.WriteString("7. Jika pengguna menanyakan sesuatu tentang diri mereka sendiri dan Anda benar-benar tidak memilikinya di *seluruh* konteks, jawab dengan jujur bahwa Anda belum tahu tanpa menggunakan bahasa penolakan sistem (seperti 'Saya AI, saya tidak punya akses').\n")
+	sb.WriteString("5. Gunakan SEMUA konteks yang tersedia (Sejarah Percakapan, Memori, Fakta, Dokumen) secara mulus. Integrasikan informasi ke dalam obrolan secara natural layaknya ingatan sendiri.\n")
+	sb.WriteString("6. Gunakan hanya informasi yang tersedia di konteks. Jika pengguna membagikan fakta baru (misal: kuliah/kerja di mana), cukup tanggapi obrolannya secara empatik.\n")
+	sb.WriteString("7. Jawab santai jika informasi tidak ada. Contoh: \"Wah, saya kurang tahu soal itu.\"\n")
 
 	// Voice Guidelines
 	if sc.Persona.VoiceGuidelines != "" {
@@ -264,7 +256,7 @@ func (b *Builder) behavioralRules(sc SessionContext) string {
 
 	// User display name
 	if sc.State != nil && sc.State.UserDisplayName != "" {
-		sb.WriteString(fmt.Sprintf("11. Anda sedang berbicara dengan '%s'. Panggil dia dengan namanya sesekali saja secara natural, JANGAN sebut namanya di awal setiap balasan.\n", sc.State.UserDisplayName))
+		sb.WriteString(fmt.Sprintf("11. Anda sedang berbicara dengan '%s'. Panggil dia dengan namanya secara natural di tengah atau akhir kalimat sesekali.\n", sc.State.UserDisplayName))
 	}
 
 	return sb.String()

@@ -70,8 +70,8 @@ func TestComposer_WithCorrection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.SystemPrompt, "KOREKSI") {
-		t.Error("expected correction directive in system prompt")
+	if !strings.Contains(result.UserPrompt, "mengoreksi") {
+		t.Error("expected correction directive in user prompt")
 	}
 	if result.Intent != string(classifier.IntentCorrect) {
 		t.Errorf("expected intent=correct, got %s", result.Intent)
@@ -103,8 +103,8 @@ func TestComposer_WithStepByStepPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.SystemPrompt, "step-by-step") {
-		t.Error("expected step-by-step directive")
+	if !strings.Contains(result.UserPrompt, "step-by-step") {
+		t.Error("expected step-by-step directive in user prompt")
 	}
 }
 
@@ -132,8 +132,8 @@ func TestComposer_WithClarificationNeeded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result.SystemPrompt, "AMBIGUITAS") {
-		t.Error("expected ambiguity warning in system prompt")
+	if !strings.Contains(result.UserPrompt, "ambigu") {
+		t.Error("expected ambiguity warning in user prompt")
 	}
 }
 
