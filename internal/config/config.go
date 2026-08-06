@@ -23,6 +23,7 @@ type Config struct {
 	FlorenceURL      string `envconfig:"FLORENCE_URL" default:"http://localhost:8100"`
 	DashboardPort    string `envconfig:"DASHBOARD_PORT" default:"8090"`
 	DashboardJWT     string `envconfig:"DASHBOARD_JWT_SECRET" default:"pribadi-secret-key"`
+	PostgresDSN      string `envconfig:"POSTGRES_DSN" default:"postgres://app_dev:secretpass_local@localhost:5432/app_private_db?sslmode=disable"`
 }
 
 // Load reads configuration from .env file and environment variables

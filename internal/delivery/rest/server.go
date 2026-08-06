@@ -26,6 +26,10 @@ type Server struct {
 	jwtKey  []byte
 }
 
+func (s *Server) Router() *chi.Mux {
+    return s.router
+}
+
 // NewServer creates a new dashboard REST API server
 func NewServer(service usecase.DashboardService, jwtSecret string, logger *zerolog.Logger, port string) *Server {
 	r := chi.NewRouter()
