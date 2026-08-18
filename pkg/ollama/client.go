@@ -158,7 +158,7 @@ func (c *OllamaClient) doChatFull(ctx context.Context, messages []ChatMessage, f
 			"temperature": 0.7,
 			"num_ctx":     4096,
 		},
-		KeepAlive: "30m",
+		KeepAlive: "5m",
 	}
 
 	data, _ := json.Marshal(reqBody)
@@ -255,7 +255,7 @@ func (c *OllamaClient) ChatStream(ctx context.Context, messages []ChatMessage, t
 			"temperature": 0.7,
 			"num_ctx":     4096,
 		},
-		KeepAlive: "30m",
+		KeepAlive: "5m",
 	}
 
 	data, _ := json.Marshal(reqBody)
@@ -327,7 +327,7 @@ func (c *OllamaClient) GenerateEmbedding(ctx context.Context, text string) ([]fl
 	start := time.Now()
 	textLen := len(text)
 
-	reqBody := embeddingRequest{Model: c.model, Prompt: text, KeepAlive: "30m"}
+	reqBody := embeddingRequest{Model: c.model, Prompt: text, KeepAlive: "10s"}
 	data, _ := json.Marshal(reqBody)
 
 	req, _ := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/embeddings", bytes.NewBuffer(data))
