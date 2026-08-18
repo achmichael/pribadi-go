@@ -19,3 +19,4 @@ graphify-out/*
 internal/prompt/composer_test.go
 internal/prompt/builder_test.go
 internal/prompt/injection_test.go
+tmp_bin
