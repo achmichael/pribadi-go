@@ -62,11 +62,11 @@ type AuthRepository interface {
 	GetUserByPhone(phone string) (*User, error)
 	GetUserByID(id string) (*User, error)
 	UpdateUser(user *User) error
-	
+
 	SaveOTP(otp *OTPCode) error
 	GetLatestOTP(userID string, purpose OTPPurpose) (*OTPCode, error)
 	UpdateOTP(otp *OTPCode) error
-	
+
 	CreateSession(session *Session) error
 	GetSessionByHash(hash string) (*Session, error)
 	DeleteSession(id string) error

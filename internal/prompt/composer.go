@@ -225,6 +225,23 @@ func (c *composer) buildUserPrompt(params ComposeParams) string {
 		sb.WriteString("\n\n")
 	}
 
+	// Inject Conversation History here so LLM sees the previous turns
+	if len(params.ConversationHistory) > 0 {
+		if !hasContext {
+			sb.WriteString("[Konteks Referensi]:\n")
+			hasContext = true
+		}
+		sb.WriteString("Sejarah Percakapan:\n")
+		for _, msg := range params.ConversationHistory {
+			role := "User"
+			if msg.Role == "assistant" {
+				role = "Anda"
+			}
+			sb.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
+		}
+		sb.WriteString("\n")
+	}
+
 	// Inject RAG Context
 	if sc != nil && sc.HasRAG {
 		if !hasContext {

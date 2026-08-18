@@ -45,7 +45,7 @@ func (s *retrievalService) Retrieve(ctx context.Context, question string, target
 		Str("target_doc_id", targetDocID).
 		Msg("[retrieval] starting search")
 
-	results, err := s.vectorRepo.Search(ctx, question, 8, targetDocID)
+	results, err := s.vectorRepo.Search(ctx, question, 4, targetDocID)
 	searchDur := time.Since(start)
 
 	if err != nil {

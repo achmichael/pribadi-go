@@ -71,6 +71,9 @@ type PrefUpdate struct {
 type IntentClassifier interface {
 	// Classify analyzes a user message and returns classification.
 	Classify(ctx context.Context, params ClassifyParams) (*Classification, error)
+
+	// HeuristicOnly runs only the fast heuristic classifier (no LLM).
+	HeuristicOnly(params ClassifyParams) *Classification
 }
 
 // ClassifyParams holds inputs for classification.
@@ -204,14 +207,21 @@ func (c *intentClassifier) Classify(ctx context.Context, params ClassifyParams) 
 	return &result, nil
 }
 
+func (c *intentClassifier) HeuristicOnly(params ClassifyParams) *Classification {
+	if result := c.heuristicClassify(params); result != nil {
+		return result
+	}
+	return c.fallbackClassify(params)
+}
+
 // heuristicClassify handles obvious cases without LLM call.
 func (c *intentClassifier) heuristicClassify(params ClassifyParams) *Classification {
 	text := strings.TrimSpace(strings.ToLower(params.UserText))
 
 	// Greeting patterns
-	greetings := []string{"hi", "halo", "hello", "hey", "hai", "selamat pagi", "selamat siang", "selamat malam", "pagi", "siang", "malam"}
+	greetings := []string{"hi", "halo", "hello", "hey", "hai", "selamat pagi", "selamat siang", "selamat malam", "pagi", "siang", "malam", "makasih", "makasih lo", "terima kasih", "thanks", "aamiiinn", "amin", "amiiin"}
 	for _, g := range greetings {
-		if text == g {
+		if text == g || (strings.HasPrefix(text, g+" ") && len(text) < 30) {
 			return &Classification{
 				MessageClass: ClassCasual,
 				Intent:       IntentChitChat,
@@ -328,7 +338,7 @@ func (c *intentClassifier) fallbackClassify(params ClassifyParams) *Classificati
 	// Question heuristic: ends with ? or starts with question words
 	isQuestion := strings.HasSuffix(text, "?")
 	questionStarters := []string{"apa", "siapa", "kapan", "dimana", "mengapa", "kenapa", "bagaimana", "berapa",
-		"what", "who", "when", "where", "why", "how", "which", "apakah", "bisakah", "can", "could", "is", "are", "do", "does"}
+		"what", "who", "when", "where", "why", "how", "which", "apakah", "bisakah", "can", "could", "is", "are", "do", "does", "deskripsikan"}
 	lower := strings.ToLower(text)
 	for _, q := range questionStarters {
 		if strings.HasPrefix(lower, q+" ") || strings.HasPrefix(lower, q+",") {

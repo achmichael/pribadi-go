@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -14,13 +15,13 @@ import (
 	"github.com/achmichael/pribadi-go/internal/domain"
 	"github.com/achmichael/pribadi-go/internal/factmemory"
 	"github.com/achmichael/pribadi-go/internal/identity"
-	"github.com/achmichael/pribadi-go/internal/planner"
 	"github.com/achmichael/pribadi-go/internal/prompt"
 	"github.com/achmichael/pribadi-go/internal/reasoning"
 	"github.com/achmichael/pribadi-go/internal/repository"
 	"github.com/achmichael/pribadi-go/internal/response"
 	"github.com/achmichael/pribadi-go/internal/usecase/rag"
 	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/utils"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
@@ -41,13 +42,11 @@ type orchestrator struct {
 	memory        factmemory.MemoryManager
 	resolver      *identity.Resolver
 	refResolver   ReferenceResolver
+	embedder      *utils.OllamaEmbedder
 
 	stateManager      conversation.StateManager
 	prefManager       conversation.PreferenceManager
 	intentClassifier  classifier.IntentClassifier
-	taskClassifier    classifier.TaskClassifier
-	interceptor       classifier.Interceptor
-	planner           planner.Planner
 	contextBuilder    contextpkg.Builder
 	promptBuilder     *prompt.Builder
 	promptComposer    prompt.Composer
@@ -56,9 +55,15 @@ type orchestrator struct {
 	responseProcessor response.Processor
 	interactionLogger response.InteractionLogger
 	logger            *zerolog.Logger
+
+	canonicalIntents []canonicalIntent
 }
 
-// DocMeta represents structured metadata extracted from documents
+type canonicalIntent struct {
+	label     string
+	embedding []float32
+}
+
 type DocMeta struct {
 	DocumentType    string `json:"document_type"`
 	Title           string `json:"title"`
@@ -72,6 +77,9 @@ type DocMeta struct {
 	Advisor         string `json:"advisor"`
 }
 
+const maxContextChars = 2000
+const maxToolIterations = 3
+
 func NewOrchestrator(
 	waClient *whatsapp.Client,
 	transcription TranscriptionService,
@@ -84,12 +92,10 @@ func NewOrchestrator(
 	memory factmemory.MemoryManager,
 	resolver *identity.Resolver,
 	refResolver ReferenceResolver,
+	embedder *utils.OllamaEmbedder,
 	stateManager conversation.StateManager,
 	prefManager conversation.PreferenceManager,
 	intentClassifier classifier.IntentClassifier,
-	taskClassifier classifier.TaskClassifier,
-	interceptor classifier.Interceptor,
-	planner planner.Planner,
 	contextBuilder contextpkg.Builder,
 	promptBuilder *prompt.Builder,
 	promptComposer prompt.Composer,
@@ -99,7 +105,7 @@ func NewOrchestrator(
 	interactionLogger response.InteractionLogger,
 	logger *zerolog.Logger,
 ) Orchestrator {
-	return &orchestrator{
+	o := &orchestrator{
 		waClient:          waClient,
 		transcription:     transcription,
 		extraction:        extraction,
@@ -111,12 +117,10 @@ func NewOrchestrator(
 		memory:            memory,
 		resolver:          resolver,
 		refResolver:       refResolver,
+		embedder:          embedder,
 		stateManager:      stateManager,
 		prefManager:       prefManager,
 		intentClassifier:  intentClassifier,
-		taskClassifier:    taskClassifier,
-		interceptor:       interceptor,
-		planner:           planner,
 		contextBuilder:    contextBuilder,
 		promptBuilder:     promptBuilder,
 		promptComposer:    promptComposer,
@@ -126,10 +130,90 @@ func NewOrchestrator(
 		interactionLogger: interactionLogger,
 		logger:            logger,
 	}
+
+	go o.warmCanonicalIntents()
+
+	return o
 }
 
-// maxContextChars caps how much RAG context goes into the system prompt.
-const maxContextChars = 2000
+func (o *orchestrator) warmCanonicalIntents() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	intents := []struct {
+		label string
+		text  string
+	}{
+		{"chitchat", "halo apa kabar selamat pagi hi hello hey"},
+		{"greeting", "salam kenal perkenalan"},
+		{"thanks", "terima kasih makasih thanks thank you"},
+		{"preference", "jawab dalam bahasa panggil aku pakai format"},
+		{"ask_personal", "siapa nama saya dimana saya tinggal apa pekerjaan saya"},
+		{"ask_document", "apa isi dokumen ringkas file jelaskan paper"},
+	}
+
+	for _, intent := range intents {
+		emb, err := o.embedder.Embed(ctx, "search_query: "+intent.text)
+		if err != nil {
+			o.logger.Warn().Err(err).Str("intent", intent.label).Msg("[orchestrator] canonical intent embedding failed")
+			continue
+		}
+		o.canonicalIntents = append(o.canonicalIntents, canonicalIntent{
+			label:     intent.label,
+			embedding: emb,
+		})
+	}
+
+	o.logger.Info().Int("count", len(o.canonicalIntents)).Msg("[orchestrator] canonical intents warmed")
+}
+
+func (o *orchestrator) routeIntent(ctx context.Context, userText string) string {
+	if len(o.canonicalIntents) == 0 {
+		return ""
+	}
+
+	emb, err := o.embedder.Embed(ctx, "search_query: "+userText)
+	if err != nil {
+		return ""
+	}
+
+	bestScore := float32(-1)
+	bestLabel := ""
+	for _, ci := range o.canonicalIntents {
+		score := cosineSimilarity(emb, ci.embedding)
+		if score > bestScore {
+			bestScore = score
+			bestLabel = ci.label
+		}
+	}
+
+	o.logger.Info().
+		Str("best_intent", bestLabel).
+		Float32("score", bestScore).
+		Msg("[orchestrator] embedding router result")
+
+	if bestScore >= 0.65 {
+		return bestLabel
+	}
+	return ""
+}
+
+func cosineSimilarity(a, b []float32) float32 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
+	}
+	var dot, normA, normB float64
+	for i := range a {
+		dot += float64(a[i]) * float64(b[i])
+		normA += float64(a[i]) * float64(a[i])
+		normB += float64(b[i]) * float64(b[i])
+	}
+	denom := math.Sqrt(normA) * math.Sqrt(normB)
+	if denom == 0 {
+		return 0
+	}
+	return float32(dot / denom)
+}
 
 func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage) error {
 	handleStart := time.Now()
@@ -139,7 +223,6 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 		Str("type", string(msg.MessageType)).
 		Msg("[orchestrator] handle start")
 
-	// ── 0. Resolve platform identity → internal UserID ─────────────
 	userID, err := o.resolver.ResolveUserID(ctx, "whatsapp", msg.SenderJID)
 	if err != nil {
 		o.logger.Error().Err(err).
@@ -149,12 +232,10 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 	}
 
 	var userText string
-	sessionID := "default" // TODO: multi-session
+	sessionID := "default"
 
-	// ── 1. Preprocessing ──────────────────────────────────────────────
 	switch msg.MessageType {
 	case whatsapp.MessageTypeVoiceNote:
-		// 1a. Download audio
 		audioMsg := msg.RawMessage.GetAudioMessage()
 		if audioMsg == nil {
 			return fmt.Errorf("no audio message found")
@@ -171,7 +252,6 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 			Dur("duration_ms", time.Since(dlStart)).
 			Msg("[orchestrator] media download done")
 
-		// 1b. Transcribe
 		txStart := time.Now()
 		text, err := o.transcription.Transcribe(ctx, data)
 		if err != nil {
@@ -186,7 +266,6 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 		userText = text
 
 	case whatsapp.MessageTypeImage, whatsapp.MessageTypeDocument:
-		// 1a. Download media
 		var data []byte
 		var dlErr error
 		var mime string
@@ -219,7 +298,6 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 			mime = msg.MediaMimetype
 		}
 
-		// 1b. Extract text
 		exStart := time.Now()
 		text, err := o.extraction.ExtractText(ctx, data, mime)
 		if err != nil {
@@ -231,7 +309,6 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 			Dur("duration_ms", time.Since(exStart)).
 			Msg("[orchestrator] extraction done")
 
-		// Debug log for extracted text (truncated to 1000 chars to avoid overwhelming the console)
 		previewText := text
 		if len(previewText) > 1000 {
 			previewText = previewText[:1000] + "... (truncated)"
@@ -247,20 +324,420 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 				userText = fmt.Sprintf("%s\n\nUser caption: %s", text, msg.Caption)
 			}
 		} else {
-			// Document: ingest into RAG, reply with confirmation only.
+			return o.handleDocumentUpload(ctx, msg, userID, sessionID, text, data, handleStart)
+		}
 
-			// === EXTRACT METADATA VIA LLM ===
-			metaStart := time.Now()
-			metadata := map[string]string{"source_file": msg.ID}
+	default:
+		userText = msg.TextContent
+	}
 
-			extractText := text
-			if len(extractText) > 2000 {
-				extractText = extractText[:2000]
+	o.logger.Info().
+		Str("msg_id", msg.ID).
+		Int("user_text_len", len(userText)).
+		Dur("preprocess_ms", time.Since(handleStart)).
+		Msg("[orchestrator] preprocessing complete, starting pipeline")
+
+	if strings.TrimSpace(strings.ToLower(userText)) == "/reset" {
+		return o.handleReset(ctx, msg, userID, sessionID)
+	}
+
+	state, err := o.stateManager.Load(ctx, userID, sessionID)
+	if err != nil {
+		o.logger.Warn().Err(err).Msg("[orchestrator] state load failed, continuing with empty state")
+	}
+	var stateData *domain.StateData
+	if state != nil {
+		stateData = state
+	}
+
+	heuristicStart := time.Now()
+	classResult := o.intentClassifier.HeuristicOnly(classifier.ClassifyParams{
+		UserText: userText,
+	})
+	o.logger.Info().
+		Dur("ms", time.Since(heuristicStart)).
+		Msg("[orchestrator] heuristic classify done")
+
+	if classResult != nil && classResult.Intent == classifier.IntentSetPreference {
+		intercepted, ackMsg, intErr := o.handlePreferenceIntercept(ctx, userID, sessionID, userText, classResult, stateData)
+		if intErr != nil {
+			o.logger.Warn().Err(intErr).Msg("[orchestrator] interceptor error")
+		}
+		if intercepted {
+			sendErr := o.waClient.SendText(ctx, msg.SenderJID, ackMsg)
+			o.persistAndLog(userID, sessionID, msg.ID, userText, ackMsg, classResult, handleStart, sendErr)
+			return sendErr
+		}
+	}
+
+	routerStart := time.Now()
+	routedIntent := o.routeIntent(ctx, userText)
+	o.logger.Info().
+		Str("routed_intent", routedIntent).
+		Dur("ms", time.Since(routerStart)).
+		Msg("[orchestrator] embedding router done")
+
+	ragQuery := userText
+	targetDocID := ""
+	if msg.MessageType == whatsapp.MessageTypeText || msg.MessageType == whatsapp.MessageTypeVoiceNote {
+		ragQuery, targetDocID = o.refResolver.ResolveQuery(ctx, userID, userText, sessionID)
+	}
+
+	contextStart := time.Now()
+	skipRAG := routedIntent == "chitchat" || routedIntent == "greeting" || routedIntent == "thanks"
+	skipMemory := routedIntent == "greeting" || routedIntent == "thanks"
+
+	sc, err := o.contextBuilder.Build(ctx, contextpkg.BuildParams{
+		UserID:       userID,
+		SessionID:    sessionID,
+		UserText:     userText,
+		RAGQuery:     ragQuery,
+		TargetDocID:  targetDocID,
+		HistoryLimit: 10,
+		SkipRAG:      skipRAG,
+		SkipMemory:   skipMemory,
+	})
+	if err != nil {
+		return fmt.Errorf("context builder: %w", err)
+	}
+	o.logger.Info().
+		Dur("ms", time.Since(contextStart)).
+		Msg("[orchestrator] context build done")
+
+	var convHistory []prompt.HistoryMessage
+	if historyMsgs, err := o.repo.ListMessagesByUserSession(ctx, userID, sessionID, 10); err == nil {
+		for _, m := range historyMsgs {
+			convHistory = append(convHistory, prompt.HistoryMessage{
+				Role:    m.Role,
+				Content: m.Content,
+			})
+		}
+	}
+
+	composed, err := o.promptComposer.Compose(ctx, prompt.ComposeParams{
+		UserText:            userText,
+		Classification:      classResult,
+		Plan:                nil,
+		SessionContext:      sc,
+		ConversationHistory: convHistory,
+	})
+	if err != nil {
+		return fmt.Errorf("prompt composer: %w", err)
+	}
+
+	messages := []ollama.ChatMessage{
+		{Role: "system", Content: composed.SystemPrompt},
+		{Role: "user", Content: composed.UserPrompt},
+	}
+
+	o.logger.Info().
+		Str("msg_id", msg.ID).
+		Int("sys_len", len(composed.SystemPrompt)).
+		Int("user_len", len(composed.UserPrompt)).
+		Msg("[orchestrator] sending unified call to Ollama")
+
+	llmCallCount := 0
+	llmStart := time.Now()
+
+	streamCh, streamErr := o.ollama.ChatStream(ctx, messages, o.ollama.Schemas())
+	var rawResponse string
+
+	if streamErr != nil {
+		o.logger.Warn().Err(streamErr).Msg("[orchestrator] stream failed, falling back to non-stream")
+		result, err := o.ollama.ChatWithTools(ctx, messages, "")
+		if err != nil {
+			llmDur := time.Since(llmStart)
+			o.logger.Error().Err(err).Dur("ms", llmDur).Msg("[orchestrator] Ollama generation failed")
+			o.interactionLogger.LogError(ctx, userID, sessionID, userText, err.Error(), time.Since(handleStart).Milliseconds())
+			return err
+		}
+		llmCallCount++
+		rawResponse = result.Content
+
+		if len(result.ToolCalls) > 0 {
+			rawResponse, llmCallCount, err = o.handleToolCalls(ctx, messages, result.ToolCalls, userID, ragQuery, targetDocID, llmCallCount)
+			if err != nil {
+				o.interactionLogger.LogError(ctx, userID, sessionID, userText, err.Error(), time.Since(handleStart).Milliseconds())
+				return err
 			}
-			// Normalisasi spasi dan newline agar LLM tidak bingung dengan format OCR
-			extractText = strings.Join(strings.Fields(extractText), " ")
+		}
+	} else {
+		llmCallCount++
+		var fullContent strings.Builder
+		sentBuffer := ""
+		sentCount := 0
+		const maxPartialSends = 3
+		var accumulatedToolCalls []ollama.ToolCall
 
-			metaPrompt := `ANDA ADALAH: DOCUMENT METADATA EXTRACTION AGENT
+		for chunk := range streamCh {
+			if chunk.Err != nil {
+				o.logger.Warn().Err(chunk.Err).Msg("[orchestrator] stream chunk error")
+				break
+			}
+			fullContent.WriteString(chunk.Content)
+			if len(chunk.ToolCalls) > 0 {
+				accumulatedToolCalls = append(accumulatedToolCalls, chunk.ToolCalls...)
+			}
+
+			if !chunk.Done && sentCount < maxPartialSends {
+				sentBuffer += chunk.Content
+				if idx := findSentenceEnd(sentBuffer); idx > 0 && len(sentBuffer[:idx]) > 30 {
+					partial := strings.TrimSpace(sentBuffer[:idx])
+					if partial != "" {
+						o.waClient.SendText(ctx, msg.SenderJID, partial)
+						sentCount++
+						o.logger.Debug().
+							Int("partial_num", sentCount).
+							Int("len", len(partial)).
+							Msg("[orchestrator] partial send")
+					}
+					sentBuffer = sentBuffer[idx:]
+				}
+			}
+		}
+		
+		if len(accumulatedToolCalls) > 0 {
+			rawResponse, llmCallCount, err = o.handleToolCalls(ctx, messages, accumulatedToolCalls, userID, ragQuery, targetDocID, llmCallCount)
+			if err != nil {
+				o.interactionLogger.LogError(ctx, userID, sessionID, userText, err.Error(), time.Since(handleStart).Milliseconds())
+				return err
+			}
+		} else {
+			rawResponse = fullContent.String()
+		}
+	}
+
+	llmDur := time.Since(llmStart)
+	o.logger.Info().
+		Str("msg_id", msg.ID).
+		Int("llm_calls", llmCallCount).
+		Dur("llm_ms", llmDur).
+		Int("response_len", len(rawResponse)).
+		Msg("[orchestrator] LLM generation complete")
+
+	finalRes, err := o.responseProcessor.Process(ctx, response.ProcessParams{
+		UserID:         userID,
+		SessionID:      sessionID,
+		UserMessage:    userText,
+		RawResponse:    rawResponse,
+		Classification: classResult,
+		Plan:           nil,
+		ComposedPrompt: composed,
+		Verification:   nil,
+		RAGSources:     sc.RAGSources,
+		State:          stateData,
+	})
+	if err != nil {
+		return fmt.Errorf("response processor: %w", err)
+	}
+
+	finalRes.Metadata.TotalDurationMs = time.Since(handleStart).Milliseconds()
+	finalRes.Metadata.LLMInferenceMs = llmDur.Milliseconds()
+
+	sendStart := time.Now()
+	sendTextErr := o.waClient.SendText(ctx, msg.SenderJID, finalRes.Text)
+	o.logger.Info().
+		Str("msg_id", msg.ID).
+		Dur("send_ms", time.Since(sendStart)).
+		Dur("total_ms", time.Since(handleStart)).
+		Int("llm_calls", llmCallCount).
+		Msg("[orchestrator] response sent")
+
+	bgCtx := context.Background()
+
+	o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
+		UserID:        userID,
+		Platform:      "whatsapp",
+		PlatformMsgID: msg.ID,
+		SessionID:     sessionID,
+		Role:          "user",
+		Content:       userText,
+		TokenCount:    estimateTokens(userText),
+	})
+	o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
+		UserID:     userID,
+		Platform:   "whatsapp",
+		SessionID:  sessionID,
+		Role:       "assistant",
+		Content:    finalRes.Text,
+		TokenCount: estimateTokens(finalRes.Text),
+	})
+
+	if finalRes.ShouldUpdate {
+		o.responseProcessor.UpdateState(bgCtx, userID, sessionID, classResult)
+		o.responseProcessor.TriggerMemorySync(userID, userText, finalRes.Text)
+	}
+
+	responseSentAt := time.Now()
+	go func() {
+		verifyStart := time.Now()
+		verification, _ := o.verifier.Verify(bgCtx, reasoning.VerifyParams{
+			UserID:       userID,
+			SessionID:    sessionID,
+			UserQuestion: userText,
+			Response:     rawResponse,
+			State:        stateData,
+			RAGContext:   sc.RAGContext,
+			RAGSources:   sc.RAGSources,
+		})
+		o.logger.Info().
+			Dur("verify_ms", time.Since(verifyStart)).
+			Dur("after_send_ms", time.Since(responseSentAt)).
+			Msg("[orchestrator] async verification done (after response sent)")
+
+		if verification != nil && !verification.IsValid {
+			o.logger.Warn().
+				Float32("confidence", verification.ConfidenceScore).
+				Str("hallucination_risk", verification.HallucinationRisk).
+				Int("issues", len(verification.Issues)).
+				Msg("[orchestrator] async verification flagged response as invalid")
+		}
+
+		reflectStart := time.Now()
+		reflection, _ := o.reflector.Reflect(bgCtx, reasoning.ReflectionParams{
+			UserQuestion: userText,
+			Response:     finalRes.Text,
+			RAGUsed:      finalRes.Metadata.RAGUsed,
+			MemoryUsed:   finalRes.Metadata.MemoryUsed,
+			HistoryUsed:  finalRes.Metadata.HistoryUsed,
+		})
+		o.logger.Info().
+			Dur("reflect_ms", time.Since(reflectStart)).
+			Dur("after_send_ms", time.Since(responseSentAt)).
+			Msg("[orchestrator] async reflection done (after response sent)")
+
+		metaMap := map[string]interface{}{
+			"llm_ms":    finalRes.Metadata.LLMInferenceMs,
+			"llm_calls": llmCallCount,
+		}
+		if classResult != nil {
+			metaMap["intent"] = classResult.Intent
+			metaMap["class"] = classResult.MessageClass
+		}
+		if verification != nil {
+			metaMap["confidence_score"] = verification.ConfidenceScore
+			metaMap["hallucination_risk"] = verification.HallucinationRisk
+			metaMap["is_valid"] = verification.IsValid
+		}
+		if reflection != nil {
+			metaMap["reflection_confidence"] = reflection.ConfidenceLevel
+		}
+
+		o.interactionLogger.Log(bgCtx, response.InteractionLog{
+			UserID:      userID,
+			SessionID:   sessionID,
+			Timestamp:   time.Now(),
+			UserMessage: userText,
+			Response:    finalRes.Text,
+			Metadata:    metaMap,
+			Duration:    finalRes.Metadata.TotalDurationMs,
+			Success:     sendTextErr == nil,
+		})
+	}()
+
+	return sendTextErr
+}
+
+func (o *orchestrator) handleToolCalls(ctx context.Context, messages []ollama.ChatMessage, toolCalls []ollama.ToolCall, userID, ragQuery, targetDocID string, callCount int) (string, int, error) {
+	currentMessages := make([]ollama.ChatMessage, len(messages))
+	copy(currentMessages, messages)
+
+	for iteration := 0; iteration < maxToolIterations && len(toolCalls) > 0; iteration++ {
+		currentMessages = append(currentMessages, ollama.ChatMessage{
+			Role:      "assistant",
+			ToolCalls: toolCalls,
+		})
+
+		for _, tc := range toolCalls {
+			toolResult := o.executeToolCall(ctx, tc, userID, ragQuery, targetDocID)
+			currentMessages = append(currentMessages, ollama.ChatMessage{
+				Role:    "tool",
+				Content: toolResult,
+			})
+		}
+
+		result, err := o.ollama.ChatWithTools(ctx, currentMessages, "")
+		callCount++
+		if err != nil {
+			return "", callCount, fmt.Errorf("tool follow-up call: %w", err)
+		}
+
+		if len(result.ToolCalls) == 0 {
+			return result.Content, callCount, nil
+		}
+		toolCalls = result.ToolCalls
+	}
+
+	lastResult, err := o.ollama.ChatWithToolsDirect(ctx, currentMessages, "", nil)
+	callCount++
+	if err != nil {
+		return "", callCount, fmt.Errorf("final call after tool cap: %w", err)
+	}
+	return lastResult.Content, callCount, nil
+}
+
+func (o *orchestrator) executeToolCall(ctx context.Context, tc ollama.ToolCall, userID, ragQuery, targetDocID string) string {
+	o.logger.Info().
+		Str("tool", tc.Function.Name).
+		Msg("[orchestrator] executing tool call")
+
+	switch tc.Function.Name {
+	case "search_documents":
+		query := ragQuery
+		if q, ok := tc.Function.Arguments["query"].(string); ok && q != "" {
+			query = q
+		}
+		ctxInfo, err := o.ragRetrieve.Retrieve(ctx, query, targetDocID)
+		if err != nil {
+			return fmt.Sprintf("Error searching documents: %v", err)
+		}
+		if !ctxInfo.HasResults {
+			return "No relevant documents found."
+		}
+		result := ctxInfo.Context
+		if len(result) > maxContextChars {
+			result = result[:maxContextChars] + "\n[...truncated...]"
+		}
+		return result
+
+	case "search_memory":
+		query := ""
+		if q, ok := tc.Function.Arguments["query"].(string); ok {
+			query = q
+		}
+		if query == "" {
+			query = ragQuery
+		}
+		memCtx, err := o.memory.PrefetchRelevant(ctx, userID, query)
+		if err != nil {
+			return fmt.Sprintf("Error searching memory: %v", err)
+		}
+		if memCtx == "" {
+			return "No relevant personal facts found."
+		}
+		return memCtx
+
+	default:
+		return fmt.Sprintf("Unknown tool: %s", tc.Function.Name)
+	}
+}
+
+func (o *orchestrator) handleDocumentUpload(ctx context.Context, msg whatsapp.IncomingMessage, userID, sessionID, text string, _ []byte, handleStart time.Time) error {
+	ackSendErr := o.waClient.SendText(ctx, msg.SenderJID, "Sedang membaca dan memproses dokumen, tunggu sebentar ya ⏳")
+	if ackSendErr != nil {
+		o.logger.Warn().Err(ackSendErr).Msg("[orchestrator] failed to send initial document ack")
+	}
+
+	metaStart := time.Now()
+	metadata := map[string]string{"source_file": msg.ID}
+
+	extractText := text
+	if len(extractText) > 2000 {
+		extractText = extractText[:2000]
+	}
+	extractText = strings.Join(strings.Fields(extractText), " ")
+
+	metaPrompt := `ANDA ADALAH: DOCUMENT METADATA EXTRACTION AGENT
 
 TUGAS ANDA:
 Ekstrak metadata terstruktur dari potongan teks dokumen di bawah ini. Teks ini adalah hasil OCR/ekstraksi otomatis dari PDF dan SERING MENGANDUNG NOISE seperti: header jurnal, nomor volume/issue, kode artikel, running title dari artikel lain dalam volume yang sama, nomor halaman, watermark, atau metadata penerbit yang TIDAK BOLEH disalahartikan sebagai judul dokumen.
@@ -291,444 +768,181 @@ Jawab HANYA dalam format JSON murni, tanpa markdown, tanpa basa-basi, tanpa penj
 
 TEKS DOKUMEN UNTUK DIANALISIS:
 ` + extractText
-			metaMessages := []ollama.ChatMessage{
-				{Role: "user", Content: metaPrompt},
-			}
-
-			var parsedMeta DocMeta
-			var metaJSON string
-			metaReply, err := o.ollama.ChatJSON(ctx, metaMessages)
-			if err == nil {
-				cleanReply := strings.TrimSpace(metaReply)
-				if strings.HasPrefix(cleanReply, "```json") {
-					cleanReply = strings.TrimPrefix(cleanReply, "```json")
-					cleanReply = strings.TrimSuffix(cleanReply, "```")
-				} else if strings.HasPrefix(cleanReply, "```") {
-					cleanReply = strings.TrimPrefix(cleanReply, "```")
-					cleanReply = strings.TrimSuffix(cleanReply, "```")
-				}
-				cleanReply = strings.TrimSpace(cleanReply)
-
-				if err := json.Unmarshal([]byte(cleanReply), &parsedMeta); err == nil {
-					metadata["Title"] = parsedMeta.Title
-					metadata["Author"] = parsedMeta.Authors
-					metadata["DocumentType"] = parsedMeta.DocumentType
-					metadata["Institution"] = parsedMeta.Institution
-					metadata["PublicationYear"] = parsedMeta.PublicationYear
-
-					metaBytes, _ := json.Marshal(parsedMeta)
-					metaJSON = string(metaBytes)
-				} else {
-					o.logger.Warn().Err(err).Str("reply", cleanReply).Msg("[orchestrator] failed to parse JSON metadata")
-				}
-			} else {
-				o.logger.Warn().Err(err).Msg("[orchestrator] metadata extraction failed")
-			}
-
-			if metadata["Title"] == "" {
-				metadata["Title"] = "Unknown"
-			}
-			if metadata["Author"] == "" {
-				metadata["Author"] = "Unknown"
-			}
-			if metaJSON == "" {
-				metaJSON = "{}"
-			}
-
-			o.logger.Info().
-				Str("msg_id", msg.ID).
-				Dur("duration_ms", time.Since(metaStart)).
-				Msg("[orchestrator] LLM metadata extraction done")
-
-			docID := uuid.New().String()
-			metadata["document_id"] = docID
-
-			ingStart := time.Now()
-			count, _ := o.ragIngest.IngestText(ctx, text, metadata)
-			o.logger.Info().
-				Str("msg_id", msg.ID).
-				Int("chunks_stored", count).
-				Int("text_len", len(text)).
-				Dur("duration_ms", time.Since(ingStart)).
-				Msg("[orchestrator] RAG ingestion done")
-
-			fileName := "unknown"
-			if docMsg := msg.RawMessage.GetDocumentMessage(); docMsg != nil && docMsg.GetFileName() != "" {
-				fileName = docMsg.GetFileName()
-			}
-
-			errDoc := o.repo.InsertUserDocument(ctx, repository.InsertUserDocumentParams{
-				ID:            docID,
-				UserID:        userID,
-				PlatformMsgID: msg.ID,
-				FileName:      fileName,
-				Title:         metadata["Title"],
-				Author:        metadata["Author"],
-				MetadataJSON:  metaJSON,
-			})
-			if errDoc != nil {
-				o.logger.Warn().Err(errDoc).Msg("[orchestrator] failed to save document metadata to sqlite")
-			} else {
-				o.logger.Info().Str("doc_id", docID).Msg("[orchestrator] saved document metadata to sqlite")
-			}
-
-			sendStart := time.Now()
-			summary := fmt.Sprintf("✅ Dokumen berhasil diproses.\n📄 %d bagian disimpan ke memori.\n\nKamu bisa langsung bertanya tentang isi dokumen ini.", count)
-			err = o.waClient.SendText(ctx, msg.SenderJID, summary)
-			o.logger.Info().
-				Str("msg_id", msg.ID).
-				Dur("duration_ms", time.Since(sendStart)).
-				Dur("total_ms", time.Since(handleStart)).
-				Msg("[orchestrator] WA send done (document)")
-
-			o.repo.InsertMessageV2(context.Background(), repository.InsertMessageV2Params{
-				UserID:        userID,
-				Platform:      "whatsapp",
-				PlatformMsgID: msg.ID,
-				SessionID:     sessionID,
-				Role:          "user",
-				Content:       "[Mengirim Dokumen: " + fileName + "]",
-				TokenCount:    0,
-			})
-
-			o.repo.InsertMessageV2(context.Background(), repository.InsertMessageV2Params{
-				UserID:     userID,
-				Platform:   "whatsapp",
-				SessionID:  sessionID,
-				Role:       "assistant",
-				Content:    summary, // Variabel pesan "✅ Dokumen berhasil diproses..."
-				TokenCount: 0,
-			})
-			return err
-		}
-
-	default:
-		userText = msg.TextContent
+	metaMessages := []ollama.ChatMessage{
+		{Role: "user", Content: metaPrompt},
 	}
 
-	o.logger.Info().
-		Str("msg_id", msg.ID).
-		Int("user_text_len", len(userText)).
-		Dur("preprocess_ms", time.Since(handleStart)).
-		Msg("[orchestrator] preprocessing complete, starting retrieval + memory")
-
-	// Intercept explicit command (Reset)
-	if strings.TrimSpace(strings.ToLower(userText)) == "/reset" {
-		o.logger.Info().Str("userID", userID).Str("sessionID", sessionID).Msg("[Orchestrator] Explicit commmand received")
-
-		// clean chat from DB
-		err = o.repo.DeleteMessagesByUserSession(ctx, userID, sessionID)
-		if err != nil {
-			o.logger.Warn().Err(err).Msg("[orchestrator] failed to delete messages from sqlite")
-		}
-
-		// Reset conversation state
-		err = o.stateManager.DeleteState(ctx, userID, sessionID)
-		if err != nil {
-			o.logger.Warn().Err(err).Msg("[orchestrator] failed to delete conversation state")
-		}
-
-		// purge user fact from qdrant
-		err = o.memory.PurgeMemory(ctx, userID)
-		if err != nil {
-			o.logger.Warn().Err(err).Msg("[orchestrator] failed to purge user fact")
-		}
-
-		// delete documents from sqlite and chunks from qdrant
-		err = o.ragRetrieve.PurgeRAGDocuments(ctx, userID)
-		if err != nil {
-			o.logger.Warn().Err(err).Msg("[orchestrator] failed to delete user documents from sqlite")
-		}
-
-		err = o.repo.DeleteAllUserDocuments(ctx, userID)
-		if err != nil {
-			o.logger.Warn().Err(err).Msg("[orchestrator] failed to purge user documents from qdrant")
-		}
-
-		// Kirim balasan ke user bahwa riwayat berhasil dihapus
-		sendErr := o.waClient.SendText(ctx, msg.SenderJID, "🧹 *Sesi Diatur Ulang*\nRiwayat percakapan dan memori sesi Anda telah berhasil dibersihkan.")
-		if sendErr != nil {
-			o.logger.Warn().Err(sendErr).Msg("[orchestrator] failed to send reset confirmation")
-		}
-
-		return sendErr
-	}
-
-	// Load Session State
-	state, err := o.stateManager.Load(ctx, userID, sessionID)
-	if err != nil {
-		o.logger.Warn().Err(err).Msg("[orchestrator] state load failed, continuing with empty state")
-	}
-	var stateData *domain.StateData
-	var rawState *repository.ConversationStateRow
-	var turnCount int
-	if state != nil {
-		stateData = state
-		if raw, _ := o.stateManager.GetRaw(ctx, userID, sessionID); raw != nil {
-			rawState = raw
-			turnCount = raw.TurnCount
-		}
-	}
-
-	// ── 2. Reference Resolution (Extract Context Needs) ─────────────
-	ragQuery := userText
-	targetDocID := ""
-	if msg.MessageType == whatsapp.MessageTypeText || msg.MessageType == whatsapp.MessageTypeVoiceNote {
-		ragQuery, targetDocID = o.refResolver.ResolveQuery(ctx, userID, userText, sessionID)
-		if targetDocID != "" {
-			doc, err := o.repo.GetUserDocumentByID(ctx, targetDocID)
-			if err == nil && doc != nil {
-				// --- Query Contextualization Agent ---
-				if doc.MetadataJSON != "" && doc.MetadataJSON != "{}" {
-					contextualizePrompt := fmt.Sprintf(`ANDA ADALAH: QUERY CONTEXTUALIZATION AGENT untuk sistem RAG multilingual.
-
-KONTEKS:
-Sistem ini menyimpan dokumen yang isinya bisa berbahasa apa saja (Inggris, Indonesia, dll). 
-Pengguna sedang memberikan query: "%s"
-
-TUGAS ANDA:
-Anda menerima query asli dari pengguna beserta metadata dokumen aktif (jika ada). Tugas Anda BUKAN menjawab pertanyaan, tetapi menghasilkan SATU query pencarian semantik yang dioptimalkan untuk vector retrieval (RAG), dengan ATURAN KETAT:
-
-1. Jika pertanyaan pengguna sangat umum (misal: "apa isi dokumen tersebut?", "tolong ringkas dokumennya", "jelaskan isi file ini"), kembalikan SAJA query asli tersebut ("apa isi dari dokumen tersebut?") TANPA tambahan kata-kata lain. JANGAN mengarang kata kunci dari metadata jika tidak diminta!
-2. Hanya lakukan penambahan istilah spesifik dari metadata jika pengguna menanyakan sesuatu yang sangat butuh penyeimbang bahasa (misal terjemahan).
-3. Output HANYA berupa query hasil akhir dalam bentuk teks polos, tanpa prefix "Query pencarian semantik:", tanpa penjelasan, tanpa markdown. JANGAN MENGARANG!
-
-INPUT METADATA: %s`, userText, doc.MetadataJSON)
-
-					ctxMsgs := []ollama.ChatMessage{{Role: "user", Content: contextualizePrompt}}
-					enrichedQuery, errCtx := o.ollama.Chat(ctx, ctxMsgs)
-					if errCtx == nil {
-						ragQuery = strings.TrimSpace(enrichedQuery)
-						o.logger.Info().Str("original_query", userText).Str("enriched_query", ragQuery).Msg("[orchestrator] query contextualization successful")
-					} else {
-						o.logger.Warn().Err(errCtx).Msg("[orchestrator] query contextualization failed, falling back to original query")
-					}
-				}
-				// ------------------------------------
-			}
-		}
-	}
-
-	// ── 3. Classification (Phase 2) ─────────────────────────────────
-	var classResult *classifier.Classification
-	var activeTask string
-	var lastIntent string
-	var lastClass string
-	if rawState != nil {
-		activeTask = rawState.ActiveTask
-		lastIntent = rawState.LastIntent
-		lastClass = rawState.LastMessageClass
-	}
-
-	intentRes, err := o.intentClassifier.Classify(ctx, classifier.ClassifyParams{
-		UserText:     userText,
-		LastIntent:   lastIntent,
-		LastClass:    lastClass,
-		ActiveTask:   activeTask,
-		TurnCount:    turnCount,
-		HasActiveDoc: targetDocID != "",
-	})
+	var parsedMeta DocMeta
+	var metaJSON string
+	metaReply, err := o.ollama.ChatJSON(ctx, metaMessages)
 	if err == nil {
-		classResult = intentRes
-	}
-
-	taskRes, _ := o.taskClassifier.Classify(ctx, classifier.TaskClassifyParams{
-		UserText:   userText,
-		ActiveTask: activeTask,
-		LastIntent: lastIntent,
-		SessionID:  sessionID,
-		UserID:     userID,
-		TurnCount:  turnCount,
-	})
-	if classResult != nil && taskRes != nil {
-		classResult.ContinuesPrevious = taskRes.ContinuesTask
-	}
-
-	// ── 4. Interceptor (Phase 2) ────────────────────────────────────
-	if classResult != nil {
-		intercepted, ackMsg, err := o.interceptor.Process(ctx, classifier.InterceptParams{
-			UserID:    userID,
-			SessionID: sessionID,
-			UserText:  userText,
-			Class:     classResult,
-			State:     stateData,
-		})
-		if err != nil {
-			o.logger.Warn().Err(err).Msg("[orchestrator] interceptor error")
+		cleanReply := strings.TrimSpace(metaReply)
+		if strings.HasPrefix(cleanReply, "```json") {
+			cleanReply = strings.TrimPrefix(cleanReply, "```json")
+			cleanReply = strings.TrimSuffix(cleanReply, "```")
+		} else if strings.HasPrefix(cleanReply, "```") {
+			cleanReply = strings.TrimPrefix(cleanReply, "```")
+			cleanReply = strings.TrimSuffix(cleanReply, "```")
 		}
-		if intercepted {
-			o.logger.Info().Str("msg_id", msg.ID).Msg("[orchestrator] request intercepted (e.g. preference update)")
-			sendErr := o.waClient.SendText(ctx, msg.SenderJID, ackMsg)
-			
-			bgCtx := context.Background()
-			
-			// 1. Persist to history so the LLM knows what happened
-			o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
-				UserID:        userID,
-				Platform:      "whatsapp",
-				PlatformMsgID: msg.ID,
-				SessionID:     sessionID,
-				Role:          "user",
-				Content:       userText,
-				TokenCount:    estimateTokens(userText),
-			})
-			o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
-				UserID:     userID,
-				Platform:   "whatsapp",
-				SessionID:  sessionID,
-				Role:       "assistant",
-				Content:    ackMsg,
-				TokenCount: estimateTokens(ackMsg),
-			})
-			
-			// 2. State update
-			o.responseProcessor.UpdateState(bgCtx, userID, sessionID, classResult)
-			
-			// 3. Trigger memory sync so facts are extracted
-			o.responseProcessor.TriggerMemorySync(userID, userText, ackMsg)
-			
-			// 4. Log interaction
-			o.interactionLogger.Log(bgCtx, response.InteractionLog{
-				UserID:      userID,
-				SessionID:   sessionID,
-				Timestamp:   time.Now(),
-				UserMessage: userText,
-				Response:    ackMsg,
-				Metadata:    map[string]interface{}{"intercepted": true},
-				Duration:    time.Since(handleStart).Milliseconds(),
-				Success:     sendErr == nil,
-			})
+		cleanReply = strings.TrimSpace(cleanReply)
 
-			return sendErr
+		if err := json.Unmarshal([]byte(cleanReply), &parsedMeta); err == nil {
+			metadata["Title"] = parsedMeta.Title
+			metadata["Author"] = parsedMeta.Authors
+			metadata["DocumentType"] = parsedMeta.DocumentType
+			metadata["Institution"] = parsedMeta.Institution
+			metadata["PublicationYear"] = parsedMeta.PublicationYear
+
+			metaBytes, _ := json.Marshal(parsedMeta)
+			metaJSON = string(metaBytes)
+		} else {
+			o.logger.Warn().Err(err).Str("reply", cleanReply).Msg("[orchestrator] failed to parse JSON metadata")
 		}
+	} else {
+		o.logger.Warn().Err(err).Msg("[orchestrator] metadata extraction failed")
 	}
 
-	// ── 5. Planner (Phase 2) ────────────────────────────────────────
-	plan, err := o.planner.CreatePlan(ctx, planner.PlanParams{
-		UserText:       userText,
-		Classification: classResult,
-		State:          stateData,
-		HasActiveDoc:   targetDocID != "",
-		TurnCount:      turnCount,
-	})
-	if err != nil {
-		o.logger.Warn().Err(err).Msg("[orchestrator] planning failed, fallback to defaults")
+	if metadata["Title"] == "" {
+		metadata["Title"] = "Unknown"
 	}
-
-	// ── 6. Context Builder & Prompt Composer (Phase 3) ──────────────
-	sc, err := o.contextBuilder.Build(ctx, contextpkg.BuildParams{
-		UserID:       userID,
-		SessionID:    sessionID,
-		UserText:     userText,
-		RAGQuery:     ragQuery,
-		TargetDocID:  targetDocID,
-		HistoryLimit: 10,
-		SkipRAG:      plan != nil && !plan.NeedsRAG,
-		SkipMemory:   plan != nil && !plan.NeedsMemory,
-	})
-	if err != nil {
-		return fmt.Errorf("context builder: %w", err)
+	if metadata["Author"] == "" {
+		metadata["Author"] = "Unknown"
 	}
-
-	var convHistory []prompt.HistoryMessage
-	if historyMsgs, err := o.repo.ListMessagesByUserSession(ctx, userID, sessionID, 10); err == nil {
-		for _, m := range historyMsgs {
-			convHistory = append(convHistory, prompt.HistoryMessage{
-				Role:    m.Role,
-				Content: m.Content,
-			})
-		}
+	if metaJSON == "" {
+		metaJSON = "{}"
 	}
-
-	composed, err := o.promptComposer.Compose(ctx, prompt.ComposeParams{
-		UserText:            userText,
-		Classification:      classResult,
-		Plan:                plan,
-		SessionContext:      sc,
-		ConversationHistory: convHistory,
-	})
-	if err != nil {
-		return fmt.Errorf("prompt composer: %w", err)
-	}
-
-	// ── 7. LLM Generation ───────────────────────────────────────────
-	messages := []ollama.ChatMessage{
-		{Role: "system", Content: composed.SystemPrompt},
-	}
-
-	for _, histMsg := range convHistory {
-		messages = append(messages, ollama.ChatMessage{
-			Role:    histMsg.Role,
-			Content: histMsg.Content,
-		})
-	}
-
-	messages = append(messages, ollama.ChatMessage{
-		Role:    "user",
-		Content: composed.UserPrompt,
-	})
 
 	o.logger.Info().
 		Str("msg_id", msg.ID).
-		Int("sys_len", len(composed.SystemPrompt)).
-		Int("user_len", len(composed.UserPrompt)).
-		Msg("[orchestrator] sending to Ollama")
+		Dur("duration_ms", time.Since(metaStart)).
+		Msg("[orchestrator] LLM metadata extraction done")
 
-	llmStart := time.Now()
-	rawResponse, err := o.ollama.Chat(ctx, messages)
-	llmDur := time.Since(llmStart)
-	if err != nil {
-		o.logger.Error().Err(err).Dur("ms", llmDur).Msg("[orchestrator] Ollama generation failed")
+	docID := uuid.New().String()
+	metadata["document_id"] = docID
+	metadata["user_id"] = userID
 
-		// Log error
-		o.interactionLogger.LogError(ctx, userID, sessionID, userText, err.Error(), time.Since(handleStart).Milliseconds())
-		return err
+	ingStart := time.Now()
+	count, _ := o.ragIngest.IngestText(ctx, text, metadata)
+	o.logger.Info().
+		Str("msg_id", msg.ID).
+		Int("chunks_stored", count).
+		Int("text_len", len(text)).
+		Dur("duration_ms", time.Since(ingStart)).
+		Msg("[orchestrator] RAG ingestion done")
+
+	fileName := "unknown"
+	if docMsg := msg.RawMessage.GetDocumentMessage(); docMsg != nil && docMsg.GetFileName() != "" {
+		fileName = docMsg.GetFileName()
 	}
 
-	// ── 8. Verifier (Phase 4) ───────────────────────────────────────
-	verification, _ := o.verifier.Verify(ctx, reasoning.VerifyParams{
-		UserID:       userID,
-		SessionID:    sessionID,
-		UserQuestion: userText,
-		Response:     rawResponse,
-		State:        stateData,
-		RAGContext:   sc.RAGContext,
-		RAGSources:   sc.RAGSources,
+	errDoc := o.repo.InsertUserDocument(ctx, repository.InsertUserDocumentParams{
+		ID:            docID,
+		UserID:        userID,
+		PlatformMsgID: msg.ID,
+		FileName:      fileName,
+		Title:         metadata["Title"],
+		Author:        metadata["Author"],
+		MetadataJSON:  metaJSON,
 	})
-
-	// ── 9. Response Processor (Phase 5) ─────────────────────────────
-	finalRes, err := o.responseProcessor.Process(ctx, response.ProcessParams{
-		UserID:         userID,
-		SessionID:      sessionID,
-		UserMessage:    userText,
-		RawResponse:    rawResponse,
-		Classification: classResult,
-		Plan:           plan,
-		ComposedPrompt: composed,
-		Verification:   verification,
-		RAGSources:     sc.RAGSources,
-		State:          stateData,
-	})
-	if err != nil {
-		return fmt.Errorf("response processor: %w", err)
+	if errDoc != nil {
+		o.logger.Warn().Err(errDoc).Msg("[orchestrator] failed to save document metadata to sqlite")
+	} else {
+		o.logger.Info().Str("doc_id", docID).Msg("[orchestrator] saved document metadata to sqlite")
 	}
 
-	// Populate durations in metadata
-	finalRes.Metadata.TotalDurationMs = time.Since(handleStart).Milliseconds()
-	finalRes.Metadata.LLMInferenceMs = llmDur.Milliseconds()
+	sendStart := time.Now()
+	summary := fmt.Sprintf("✅ Dokumen *%s* berhasil diproses.\n📄 %d bagian disimpan ke memori.\n\nKamu bisa langsung bertanya tentang isi dokumen ini.", fileName, count)
+	sendErr := o.waClient.SendText(ctx, msg.SenderJID, summary)
+	o.logger.Info().
+		Str("msg_id", msg.ID).
+		Dur("duration_ms", time.Since(sendStart)).
+		Dur("total_ms", time.Since(handleStart)).
+		Msg("[orchestrator] WA send done (document)")
 
-	// ── 10. Send Reply ──────────────────────────────────────────────
-	sendTextErr := o.waClient.SendText(ctx, msg.SenderJID, finalRes.Text)
-
-	// ── 11. Async Post-processing ───────────────────────────────────
-	// Note: We use background context for async work to not be cancelled if request context ends
-	bgCtx := context.Background()
-
-	// 1. Persist Raw Messages
-	o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
+	o.repo.InsertMessageV2(context.Background(), repository.InsertMessageV2Params{
 		UserID:        userID,
 		Platform:      "whatsapp",
 		PlatformMsgID: msg.ID,
+		SessionID:     sessionID,
+		Role:          "user",
+		Content:       "[Mengirim Dokumen: " + fileName + "]",
+		TokenCount:    0,
+	})
+
+	o.repo.InsertMessageV2(context.Background(), repository.InsertMessageV2Params{
+		UserID:    userID,
+		Platform:  "whatsapp",
+		SessionID: sessionID,
+		Role:      "assistant",
+		Content:   summary,
+		TokenCount: 0,
+	})
+	return sendErr
+}
+
+func (o *orchestrator) handleReset(ctx context.Context, msg whatsapp.IncomingMessage, userID, sessionID string) error {
+	o.logger.Info().Str("userID", userID).Str("sessionID", sessionID).Msg("[Orchestrator] Explicit commmand received")
+
+	err := o.repo.DeleteMessagesByUserSession(ctx, userID, sessionID)
+	if err != nil {
+		o.logger.Warn().Err(err).Msg("[orchestrator] failed to delete messages from sqlite")
+	}
+
+	err = o.stateManager.DeleteState(ctx, userID, sessionID)
+	if err != nil {
+		o.logger.Warn().Err(err).Msg("[orchestrator] failed to delete conversation state")
+	}
+
+	err = o.memory.PurgeMemory(ctx, userID)
+	if err != nil {
+		o.logger.Warn().Err(err).Msg("[orchestrator] failed to purge user fact")
+	}
+
+	err = o.ragRetrieve.PurgeRAGDocuments(ctx, userID)
+	if err != nil {
+		o.logger.Warn().Err(err).Msg("[orchestrator] failed to delete user documents from sqlite")
+	}
+
+	err = o.repo.DeleteAllUserDocuments(ctx, userID)
+	if err != nil {
+		o.logger.Warn().Err(err).Msg("[orchestrator] failed to purge user documents from qdrant")
+	}
+
+	sendErr := o.waClient.SendText(ctx, msg.SenderJID, "🧹 *Sesi Diatur Ulang*\nRiwayat percakapan dan memori sesi Anda telah berhasil dibersihkan.")
+	if sendErr != nil {
+		o.logger.Warn().Err(sendErr).Msg("[orchestrator] failed to send reset confirmation")
+	}
+
+	return sendErr
+}
+
+func (o *orchestrator) handlePreferenceIntercept(ctx context.Context, userID, sessionID, userText string, classResult *classifier.Classification, stateData *domain.StateData) (bool, string, error) {
+	if classResult == nil || len(classResult.ExtractedPrefs) == 0 {
+		return false, "", nil
+	}
+
+	for _, pref := range classResult.ExtractedPrefs {
+		_ = o.prefManager.SetExplicit(ctx, userID, pref.Key, pref.Value)
+	}
+
+	_ = o.stateManager.ApplyPreferences(ctx, userID, stateData)
+
+	var ackParts []string
+	for _, pref := range classResult.ExtractedPrefs {
+		ackParts = append(ackParts, fmt.Sprintf("%s → %s", pref.Key, pref.Value))
+	}
+	ackMsg := "✅ Preferensi diperbarui: " + strings.Join(ackParts, ", ")
+
+	return true, ackMsg, nil
+}
+
+func (o *orchestrator) persistAndLog(userID, sessionID, msgID, userText, reply string, classResult *classifier.Classification, handleStart time.Time, sendErr error) {
+	bgCtx := context.Background()
+
+	o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
+		UserID:        userID,
+		Platform:      "whatsapp",
+		PlatformMsgID: msgID,
 		SessionID:     sessionID,
 		Role:          "user",
 		Content:       userText,
@@ -739,67 +953,37 @@ INPUT METADATA: %s`, userText, doc.MetadataJSON)
 		Platform:   "whatsapp",
 		SessionID:  sessionID,
 		Role:       "assistant",
-		Content:    finalRes.Text,
-		TokenCount: estimateTokens(finalRes.Text),
+		Content:    reply,
+		TokenCount: estimateTokens(reply),
 	})
 
-	// 2. Update State
-	if finalRes.ShouldUpdate {
-		o.responseProcessor.UpdateState(bgCtx, userID, sessionID, classResult)
-	}
+	o.responseProcessor.UpdateState(bgCtx, userID, sessionID, classResult)
+	o.responseProcessor.TriggerMemorySync(userID, userText, reply)
 
-	// 3. Trigger Memory Sync
-	if finalRes.ShouldUpdate {
-		o.responseProcessor.TriggerMemorySync(userID, userText, finalRes.Text)
-	}
-
-	// 4. Reflector & Logging
-	go func() {
-		// Reflect
-		reflection, _ := o.reflector.Reflect(bgCtx, reasoning.ReflectionParams{
-			UserQuestion: userText,
-			Response:     finalRes.Text,
-			Plan:         fmt.Sprintf("%+v", plan),
-			RAGUsed:      finalRes.Metadata.RAGUsed,
-			MemoryUsed:   finalRes.Metadata.MemoryUsed,
-			HistoryUsed:  finalRes.Metadata.HistoryUsed,
-		})
-		finalRes.Metadata.Reflection = reflection
-
-		// Convert metadata to map[string]interface{}
-		metaMap := map[string]interface{}{
-			"llm_ms": finalRes.Metadata.LLMInferenceMs,
-		}
-		if classResult != nil {
-			metaMap["intent"] = classResult.Intent
-			metaMap["class"] = classResult.MessageClass
-		}
-		if plan != nil {
-			metaMap["strategy"] = plan.ResponseStrategy
-		}
-		if verification != nil {
-			metaMap["confidence_score"] = verification.ConfidenceScore
-			metaMap["hallucination_risk"] = verification.HallucinationRisk
-			metaMap["is_valid"] = verification.IsValid
-		}
-
-		// Log Interaction
-		o.interactionLogger.Log(bgCtx, response.InteractionLog{
-			UserID:      userID,
-			SessionID:   sessionID,
-			Timestamp:   time.Now(),
-			UserMessage: userText,
-			Response:    finalRes.Text,
-			Metadata:    metaMap,
-			Duration:    finalRes.Metadata.TotalDurationMs,
-			Success:     sendTextErr == nil,
-		})
-	}()
-
-	return sendTextErr
+	o.interactionLogger.Log(bgCtx, response.InteractionLog{
+		UserID:      userID,
+		SessionID:   sessionID,
+		Timestamp:   time.Now(),
+		UserMessage: userText,
+		Response:    reply,
+		Metadata:    map[string]interface{}{"intercepted": true},
+		Duration:    time.Since(handleStart).Milliseconds(),
+		Success:     sendErr == nil,
+	})
 }
 
-// estimateTokens rough word-based token count.
+func findSentenceEnd(s string) int {
+	for _, sep := range []string{". ", ".\n", "! ", "!\n", "? ", "?\n"} {
+		if idx := strings.Index(s, sep); idx > 0 {
+			return idx + len(sep)
+		}
+	}
+	if idx := strings.Index(s, "\n\n"); idx > 0 {
+		return idx + 2
+	}
+	return -1
+}
+
 func estimateTokens(s string) int {
 	words := 0
 	for range strings.Fields(s) {

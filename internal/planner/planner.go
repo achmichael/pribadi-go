@@ -119,11 +119,11 @@ func (p *planner) heuristicPlan(params PlanParams) *Plan {
 	case classifier.IntentChitChat:
 		return &Plan{
 			NeedsRAG:         false,
-			NeedsMemory:      true, // might want to personalize greeting
-			NeedsHistory:     false,
+			NeedsMemory:      true, // use memory for personalization
+			NeedsHistory:     true, // need history for context
 			NeedsDocContext:  false,
 			ResponseStrategy: "direct",
-			Reasoning:        "Casual conversation, no document/RAG needed",
+			Reasoning:        "Casual conversation, no document/RAG/Memory needed",
 			Confidence:       "high",
 		}
 

@@ -59,7 +59,11 @@ func (f *citationFormatter) formatInline(response string, citations []Citation) 
 	sb.WriteString(response)
 	sb.WriteString("\n\n---\nSources:\n")
 	for _, c := range citations {
-		sb.WriteString(fmt.Sprintf("[%d] %s (%s)\n", c.Number, c.Source, c.Type))
+		displaySrc := c.Source
+		if len(displaySrc) > 20 && !strings.Contains(displaySrc, ".") && !strings.Contains(displaySrc, " ") {
+			displaySrc = "Dokumen Referensi"
+		}
+		sb.WriteString(fmt.Sprintf("[%d] %s (%s)\n", c.Number, displaySrc, c.Type))
 	}
 	return sb.String()
 }
@@ -69,7 +73,11 @@ func (f *citationFormatter) formatFootnote(response string, citations []Citation
 	sb.WriteString(response)
 	sb.WriteString("\n\n---\nReferences:\n")
 	for _, c := range citations {
-		sb.WriteString(fmt.Sprintf("%d. %s [%s]\n", c.Number, c.Source, c.Type))
+		displaySrc := c.Source
+		if len(displaySrc) > 20 && !strings.Contains(displaySrc, ".") && !strings.Contains(displaySrc, " ") {
+			displaySrc = "Dokumen Referensi"
+		}
+		sb.WriteString(fmt.Sprintf("%d. %s [%s]\n", c.Number, displaySrc, c.Type))
 	}
 	return sb.String()
 }

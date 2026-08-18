@@ -214,13 +214,22 @@ func (p *processor) buildCitations(sources []string) []prompt.Citation {
 		return nil
 	}
 	
-	citations := make([]prompt.Citation, 0, len(sources))
-	for i, src := range sources {
+	// Deduplicate citations by source ID
+	seen := make(map[string]bool)
+	var citations []prompt.Citation
+	
+	idx := 1
+	for _, src := range sources {
+		if seen[src] {
+			continue
+		}
+		seen[src] = true
 		citations = append(citations, prompt.Citation{
-			Number: i + 1,
+			Number: idx,
 			Source: src,
 			Type:   "document",
 		})
+		idx++
 	}
 	return citations
 }

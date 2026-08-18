@@ -81,14 +81,11 @@ func (b *Builder) buildFromTemplate(sc SessionContext) string {
 	sysPrompt = strings.ReplaceAll(sysPrompt, "{{persona_name}}", sc.Persona.Name)
 	sysPrompt = strings.ReplaceAll(sysPrompt, "{{persona_description}}", sc.Persona.Description)
 	sysPrompt = strings.ReplaceAll(sysPrompt, "{{tone_preference}}", b.resolveTone(sc))
+	sysPrompt = strings.ReplaceAll(sysPrompt, "{{voice_guidelines}}", sc.Persona.VoiceGuidelines)
 
 	// Behavioral framework injection
 	sysPrompt = strings.ReplaceAll(sysPrompt, "{{behavioral_rules}}", b.behavioralRules(sc))
 
-	// Context mapping for user prompt injection later
-	// RAG and Memory moved from System to User prompt to fix Lost in the Middle.
-	// We just inject placeholders or instructions here if needed.
-	
 	// RAG placeholder removal (moved to user prompt)
 	sysPrompt = strings.ReplaceAll(sysPrompt, "{{rag_context}}", "")
 	sysPrompt = strings.ReplaceAll(sysPrompt, "{{user_facts}}", "")
@@ -236,17 +233,21 @@ func (b *Builder) behavioralRules(sc SessionContext) string {
 	sb.WriteString("5. Gunakan SEMUA konteks yang tersedia (Sejarah Percakapan, Memori, Fakta, Dokumen) secara mulus. Integrasikan informasi ke dalam obrolan secara natural layaknya ingatan sendiri.\n")
 	sb.WriteString("6. Gunakan hanya informasi yang tersedia di konteks. Jika pengguna membagikan fakta baru (misal: kuliah/kerja di mana), cukup tanggapi obrolannya secara empatik.\n")
 	sb.WriteString("7. Jawab santai jika informasi tidak ada. Contoh: \"Wah, saya kurang tahu soal itu.\"\n")
+	sb.WriteString("8. JANGAN PERNAH mengawali kalimat dengan template basi seperti \"Terima kasih, [Nama]!\". Mulailah secara natural.\n")
+	sb.WriteString("9. JANGAN memberikan pujian kosong (flattery) tanpa dasar yang jelas.\n")
+	sb.WriteString("10. MIRROR TONE (Sesuaikan gaya bahasa): Jika pengguna santai, jawab santai. Jika pengguna formal, jawab formal.\n")
+	sb.WriteString("11. JANGAN memaksakan pertanyaan di akhir kalimat. Bertanyalah HANYA JIKA benar-benar diperlukan untuk melanjutkan konteks.\n")
 
 	// Voice Guidelines
 	if sc.Persona.VoiceGuidelines != "" {
-		sb.WriteString("9. Pedoman Gaya Bahasa (Voice Guidelines):\n")
+		sb.WriteString("12. Pedoman Gaya Bahasa (Voice Guidelines):\n")
 		sb.WriteString(sc.Persona.VoiceGuidelines)
 		sb.WriteString("\n")
 	}
 
 	// Custom directives from user
 	if sc.State != nil && len(sc.State.CustomDirectives) > 0 {
-		sb.WriteString("10. Instruksi khusus dari pengguna:\n")
+		sb.WriteString("13. Instruksi khusus dari pengguna:\n")
 		i := 0
 		for k, v := range sc.State.CustomDirectives {
 			sb.WriteString(fmt.Sprintf("   - %s: %s\n", k, v))
@@ -256,7 +257,7 @@ func (b *Builder) behavioralRules(sc SessionContext) string {
 
 	// User display name
 	if sc.State != nil && sc.State.UserDisplayName != "" {
-		sb.WriteString(fmt.Sprintf("11. Anda sedang berbicara dengan '%s'. Panggil dia dengan namanya secara natural di tengah atau akhir kalimat sesekali.\n", sc.State.UserDisplayName))
+		sb.WriteString(fmt.Sprintf("14. Anda sedang berbicara dengan '%s'. Panggil dia dengan namanya secara natural di tengah atau akhir kalimat sesekali.\n", sc.State.UserDisplayName))
 	}
 
 	return sb.String()
