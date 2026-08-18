@@ -157,6 +157,7 @@ func (c *OllamaClient) doChatFull(ctx context.Context, messages []ChatMessage, f
 			"num_predict": 800,
 			"temperature": 0.7,
 			"num_ctx":     4096,
+			"num_gpu": 99,
 		},
 		KeepAlive: "5m",
 	}
@@ -254,6 +255,7 @@ func (c *OllamaClient) ChatStream(ctx context.Context, messages []ChatMessage, t
 			"num_predict": 800,
 			"temperature": 0.7,
 			"num_ctx":     4096,
+			"num_gpu": 99,
 		},
 		KeepAlive: "5m",
 	}

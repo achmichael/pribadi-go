@@ -254,5 +254,5 @@ func (p *processor) determineCitationStyle(state *domain.StateData) prompt.Citat
 	}
 	
 	// Default to inline
-	return prompt.CitationInline
+	return prompt.CitationNone
 }
