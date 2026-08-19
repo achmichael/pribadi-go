@@ -17,7 +17,7 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-      - OLLAMA_MAX_LOADED_MODELS=1
+      - OLLAMA_MAX_LOADED_MODELS=2
       - OLLAMA_MAX_VRAM=4000000000
 
   # Vector Database (Untuk RAG Pipeline)

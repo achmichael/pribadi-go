@@ -49,6 +49,7 @@ type chatRequest struct {
 	Messages  []ChatMessage  `json:"messages"`
 	Stream    bool           `json:"stream"`
 	Format    string         `json:"format,omitempty"`
+	Think     bool 			 `json:"think"`
 	Tools     []Tool         `json:"tools,omitempty"`
 	Options   map[string]any `json:"options,omitempty"`
 	KeepAlive string         `json:"keep_alive,omitempty"`
@@ -151,6 +152,7 @@ func (c *OllamaClient) doChatFull(ctx context.Context, messages []ChatMessage, f
 		Model:    c.model,
 		Messages: messages,
 		Stream:   false,
+		Think:  false,
 		Format:   format,
 		Tools:    tools,
 		Options: map[string]any{
@@ -251,6 +253,7 @@ func (c *OllamaClient) ChatStream(ctx context.Context, messages []ChatMessage, t
 		Messages: messages,
 		Stream:   true,
 		Tools:    tools,
+		Think:  false,
 		Options: map[string]any{
 			"num_predict": 800,
 			"temperature": 0.7,
