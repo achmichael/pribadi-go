@@ -464,9 +464,9 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 	} else {
 		llmCallCount++
 		var fullContent strings.Builder
-		sentBuffer := ""
-		sentCount := 0
-		const maxPartialSends = 3
+		// sentBuffer := ""
+		// sentCount := 0
+		const maxPartialSends = 5
 		var accumulatedToolCalls []ollama.ToolCall
 
 		for chunk := range streamCh {
@@ -479,21 +479,21 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 				accumulatedToolCalls = append(accumulatedToolCalls, chunk.ToolCalls...)
 			}
 
-			if !chunk.Done && sentCount < maxPartialSends {
-				sentBuffer += chunk.Content
-				if idx := findSentenceEnd(sentBuffer); idx > 0 && len(sentBuffer[:idx]) > 30 {
-					partial := strings.TrimSpace(sentBuffer[:idx])
-					if partial != "" {
-						o.waClient.SendText(ctx, msg.SenderJID, partial)
-						sentCount++
-						o.logger.Debug().
-							Int("partial_num", sentCount).
-							Int("len", len(partial)).
-							Msg("[orchestrator] partial send")
-					}
-					sentBuffer = sentBuffer[idx:]
-				}
-			}
+			// if !chunk.Done && sentCount < maxPartialSends {
+			// 	sentBuffer += chunk.Content
+			// 	if idx := findSentenceEnd(sentBuffer); idx > 0 && len(sentBuffer[:idx]) > 30 {
+			// 		partial := strings.TrimSpace(sentBuffer[:idx])
+			// 		if partial != "" {
+			// 			// o.waClient.SendText(ctx, msg.SenderJID, partial)
+			// 			sentCount++
+			// 			o.logger.Debug().
+			// 				Int("partial_num", sentCount).
+			// 				Int("len", len(partial)).
+			// 				Msg("[orchestrator] partial send")
+			// 		}
+			// 		sentBuffer = sentBuffer[idx:]
+			// 	}
+			// }
 		}
 		
 		if len(accumulatedToolCalls) > 0 {
