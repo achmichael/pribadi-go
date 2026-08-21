@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,13 +18,42 @@ import (
 	"github.com/achmichael/pribadi-go/internal/usecase"
 )
 
+// RateLimiter tracks requests per user
+type RateLimiter struct {
+	mu       sync.Mutex
+	requests map[string]int
+	resetAt  time.Time
+}
+
+func newRateLimiter() *RateLimiter {
+	return &RateLimiter{
+		requests: make(map[string]int),
+		resetAt:  time.Now().Add(time.Minute),
+	}
+}
+
+func (rl *RateLimiter) allow(userID string, limit int) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	if time.Now().After(rl.resetAt) {
+		rl.requests = make(map[string]int)
+		rl.resetAt = time.Now().Add(time.Minute)
+	}
+
+	rl.requests[userID]++
+	return rl.requests[userID] <= limit
+}
+
 // Server represents the REST API server for the dashboard
 type Server struct {
-	router  *chi.Mux
-	logger  *zerolog.Logger
-	port    string
-	service usecase.DashboardService
-	jwtKey  []byte
+	router         *chi.Mux
+	logger         *zerolog.Logger
+	port           string
+	service        usecase.DashboardService
+	webChatService usecase.WebChatService
+	jwtKey         []byte
+	rateLimiter    *RateLimiter
 }
 
 func (s *Server) Router() *chi.Mux {
@@ -31,7 +61,7 @@ func (s *Server) Router() *chi.Mux {
 }
 
 // NewServer creates a new dashboard REST API server
-func NewServer(service usecase.DashboardService, jwtSecret string, logger *zerolog.Logger, port string) *Server {
+func NewServer(service usecase.DashboardService, webChatService usecase.WebChatService, jwtSecret string, logger *zerolog.Logger, port string) *Server {
 	r := chi.NewRouter()
 
 	// Middleware
@@ -41,22 +71,25 @@ func NewServer(service usecase.DashboardService, jwtSecret string, logger *zerol
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
-	// CORS config
+	// CORS config - Tightened for production
 	r.Use(cors.Handler(cors.Options{
-		AllowOriginFunc: func(r *http.Request, origin string) bool { return true },
+		// Only allow specific origins in production, fallback to localhost for dev
+		AllowedOrigins:   []string{"http://localhost:3000", "http://localhost:8090"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "Access-Control-Allow-Origin"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
 
 	srv := &Server{
-		router:  r,
-		logger:  logger,
-		port:    port,
-		service: service,
-		jwtKey:  []byte(jwtSecret),
+		router:         r,
+		logger:         logger,
+		port:           port,
+		service:        service,
+		webChatService: webChatService,
+		jwtKey:         []byte(jwtSecret),
+		rateLimiter:    newRateLimiter(),
 	}
 
 	// Routes
@@ -97,6 +130,21 @@ func NewServer(service usecase.DashboardService, jwtSecret string, logger *zerol
 			r.Post("/stocks", srv.handleAddStock)
 			r.Put("/stocks/{id}", srv.handleUpdateStock)
 			r.Delete("/stocks/{id}", srv.handleDeleteStock)
+
+			// Chat (Web UI)
+			r.Group(func(r chi.Router) {
+				r.Get("/chat/sessions", srv.handleGetSessions)
+				r.Post("/chat/sessions", srv.handleCreateSession)
+				r.Get("/chat/sessions/{id}/history", srv.handleGetSessionHistory)
+				r.Put("/chat/settings", srv.handleChatSettings)
+				
+				// Rate limited chat endpoints
+				r.Group(func(r chi.Router) {
+					r.Use(srv.chatRateLimitMiddleware)
+					r.Post("/chat/stream", srv.handleChatStream)
+					r.Post("/chat/upload", srv.handleFileUpload)
+				})
+			})
 		})
 	})
 
@@ -151,8 +199,21 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		// Add user ID to context if needed
-		ctx := context.WithValue(r.Context(), "user_id", claims["user_id"])
+		userID := claims["user_id"].(string)
+		ctx := context.WithValue(r.Context(), "user_id", userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// chatRateLimitMiddleware limits chat requests per user
+func (s *Server) chatRateLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userID := r.Context().Value("user_id").(string)
+		if !s.rateLimiter.allow(userID, 30) { // 30 messages per minute
+			http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

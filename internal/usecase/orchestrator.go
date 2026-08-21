@@ -495,7 +495,7 @@ func (o *orchestrator) Handle(ctx context.Context, msg whatsapp.IncomingMessage)
 			// 	}
 			// }
 		}
-		
+
 		if len(accumulatedToolCalls) > 0 {
 			rawResponse, llmCallCount, err = o.handleToolCalls(ctx, messages, accumulatedToolCalls, userID, ragQuery, targetDocID, llmCallCount)
 			if err != nil {
