@@ -8,8 +8,8 @@ CREATE TABLE IF NOT EXISTS web_chat_sessions (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_web_chat_sessions_user ON web_chat_sessions(user_id);
-CREATE INDEX idx_web_chat_sessions_updated ON web_chat_sessions(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_web_chat_sessions_user ON web_chat_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_web_chat_sessions_updated ON web_chat_sessions(updated_at DESC);
 
 -- Web Chat Messages
 CREATE TABLE IF NOT EXISTS web_chat_messages (
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS web_chat_messages (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_web_chat_messages_session ON web_chat_messages(session_id);
+CREATE INDEX IF NOT EXISTS idx_web_chat_messages_session ON web_chat_messages(session_id);
 
 -- User API Keys (BYOK) - Encrypted at rest
 CREATE TABLE IF NOT EXISTS user_api_keys (
