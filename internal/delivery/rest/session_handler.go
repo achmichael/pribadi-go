@@ -2,6 +2,7 @@ package rest
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -9,7 +10,7 @@ import (
 
 func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value("user_id").(string)
-	
+
 	sessions, err := s.webChatService.ListSessions(r.Context(), userID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -21,13 +22,23 @@ func (s *Server) handleGetSessions(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value("user_id").(string)
-	
+
 	var req struct {
-		Title string `json:"title"`
+		Message string `json:"message"`
 	}
+
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	session, err := s.webChatService.CreateSession(r.Context(), userID, req.Title)
+	generatedTitle, err := s.webChatService.GenerateChatTitle(r.Context(), req.Message)
+
+	fmt.Println("generated Title" + generatedTitle)
+	
+	if err != nil {
+		generatedTitle = "New Chat"
+	}
+
+	session, err := s.webChatService.CreateSession(r.Context(), userID, generatedTitle)
+
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -39,7 +50,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetSessionHistory(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "id")
 	userID := r.Context().Value("user_id").(string)
-	
+
 	// Verify ownership
 	session, err := s.webChatService.GetSession(r.Context(), sessionID)
 	if err != nil || session == nil || session.UserID != userID {

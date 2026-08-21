@@ -23,7 +23,7 @@ const SUGGESTED_PROMPTS = [
 export function ChatArea() {
   const [input, setInput] = useState("");
   const [model, setModel] = useState("local");
-  const { messages, addMessage, appendStreamChunk, setIsStreaming, isStreaming, activeSessionId } = useChatStore();
+  const { messages, addMessage, appendStreamChunk, setIsStreaming, isStreaming, activeSessionId, setActiveSessionId } = useChatStore();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,6 +45,27 @@ export function ChatArea() {
     const asstId = (Date.now() + 1).toString();
     addMessage({ id: asstId, role: "assistant", content: "", createdAt: new Date().toISOString() });
 
+    let currentSessionId = activeSessionId
+    // if session id is not exist, this indices to create new chat session
+    if (!activeSessionId) {
+      const res = await fetch(`${API_BASE}/chat/sessions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeader()
+        },
+        body: JSON.stringify({
+          message: text
+        })
+      })
+
+      if (!res.ok) throw new Error("Create chat session failed")
+
+      const result = await res.json();
+      currentSessionId = result.id;
+      setActiveSessionId(result.id);
+    }
+
     try {
       const res = await fetch(`${API_BASE}/chat/stream`, {
         method: "POST",
@@ -54,7 +75,7 @@ export function ChatArea() {
         },
         body: JSON.stringify({
           message: text,
-          session_id: activeSessionId || "temp-session",
+          session_id: currentSessionId,
           model: model
         })
       });

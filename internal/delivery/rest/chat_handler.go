@@ -3,10 +3,14 @@ package rest
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/achmichael/pribadi-go/internal/logger"
 )
 
 // handleChatStream handles SSE streaming for chat completion
 func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
+	var log = logger.New("info")
+	
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -16,6 +20,7 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"session_id"`
 		Model     string `json:"model"`
 	}
+	
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
@@ -30,13 +35,14 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
-
+	
 	userID := r.Context().Value("user_id").(string)
 	ctx := r.Context()
-
+	
 	stream, err := s.webChatService.StreamChat(ctx, userID, req.SessionID, req.Message, req.Model)
 	if err != nil {
 		sendSSEEvent(w, flusher, "error", map[string]string{"message": err.Error()})
+		log.Info().Int("rest", len(err.Error())).Msg("[error]" + err.Error())
 		return
 	}
 

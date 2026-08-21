@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/achmichael/pribadi-go/internal/domain"
@@ -26,6 +27,7 @@ type WebChatService interface {
 
 	// Messages & Streaming
 	GetSessionHistory(ctx context.Context, sessionID string) ([]domain.WebChatMessage, error)
+	GenerateChatTitle(ctx context.Context, message string) (string, error)
 	StreamChat(ctx context.Context, userID, sessionID, message, model string) (<-chan ollama.StreamChunk, error)
 
 	// API Keys
@@ -77,6 +79,15 @@ func NewWebChatService(
 	}
 }
 
+func (s *webChatService) GenerateChatTitle(ctx context.Context, message string) (string, error) {
+	response, err := s.ollamaClient.GenerateChatTitle(ctx, message)
+
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(response), nil
+}
 // ─── Sessions ─────────────────────────────────────────────────────────────
 
 func (s *webChatService) CreateSession(ctx context.Context, userID, title string) (*domain.WebChatSession, error) {

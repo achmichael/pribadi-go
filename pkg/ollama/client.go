@@ -90,6 +90,20 @@ type OllamaClient struct {
 	toolRegistry ToolRegistry
 }
 
+type SimplyChatOptions struct {
+	NumPredict int
+	NumCtx int
+	Temperature float64
+}
+
+func defaultSimplyChatOptions() SimplyChatOptions {
+	return SimplyChatOptions{
+		NumPredict: 100,
+		NumCtx: 1024,
+		Temperature: 0.3,
+	}
+}
+
 func NewClient(baseURL, model string, logger *zerolog.Logger, registry ToolRegistry) *OllamaClient {
 	return &OllamaClient{
 		baseURL:      baseURL,
@@ -110,12 +124,14 @@ func estimateTokens(messages []ChatMessage) int {
 	return int(float64(total) * 1.3)
 }
 
+
 func (c *OllamaClient) Warmup(ctx context.Context) error {
 	_, err := c.Chat(ctx, []ChatMessage{
 		{Role: "user", Content: "hi"},
 	})
 	return err
 }
+
 
 func (c *OllamaClient) Chat(ctx context.Context, messages []ChatMessage) (string, error) {
 	result, err := c.ChatWithTools(ctx, messages, "")
@@ -131,6 +147,90 @@ func (c *OllamaClient) ChatJSON(ctx context.Context, messages []ChatMessage) (st
 		return "", err
 	}
 	return result.Content, nil
+}
+
+func (c *OllamaClient) GenerateChatTitle(ctx context.Context, message string) (string, error) {
+	prompt := fmt.Sprintf(`Generate a short title for this conversation.
+	Message:
+	%s
+
+	Rules:
+	- Maximum 6 words
+	- No quotation marks
+	- Return only the title.
+	- Title must using language that same as the prompt
+Text: %s`, message)
+
+	return c.SimplyChat(ctx, prompt)
+}
+
+func (c *OllamaClient) SimplyChat(ctx context.Context, prompt string) (string, error) {
+	return c.SimplyChatWithOptions(ctx, prompt, defaultSimplyChatOptions())
+}
+
+func (c *OllamaClient) SimplyChatWithOptions(ctx context.Context, prompt string, opts SimplyChatOptions) (string, error) {
+	messages := []ChatMessage{
+		{
+			Role: "user",
+			Content: prompt,
+		},
+	}
+
+	reqBody := chatRequest{
+			Model:    c.model,
+			Messages: messages,
+			Stream:   false,
+			Think:    false,
+			Options: map[string]any{
+				"num_predict": opts.NumPredict,
+				"num_ctx":     opts.NumCtx,
+				"temperature": opts.Temperature,
+				"num_gpu":     99,
+			},
+			KeepAlive: "5m",
+		}
+
+		data, err := json.Marshal(reqBody)
+			if err != nil {
+				return "", fmt.Errorf("marshal simple chat request: %w", err)
+			}
+
+			req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/chat", bytes.NewBuffer(data))
+			if err != nil {
+				return "", fmt.Errorf("create simple chat request: %w", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			start := time.Now()
+			resp, err := c.httpClient.Do(req)
+			if err != nil {
+				c.logger.Warn().Err(err).
+					Dur("duration_ms", time.Since(start)).
+					Msg("[ollama] simple chat request failed")
+				return "", fmt.Errorf("simple chat request failed: %w", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				c.logger.Error().
+					Int("status", resp.StatusCode).
+					Str("body", string(body)).
+					Msg("[ollama] simple chat non-OK response")
+				return "", fmt.Errorf("ollama simple chat error: status %d body: %s", resp.StatusCode, string(body))
+			}
+
+			var chatResp chatResponse
+			if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+				return "", fmt.Errorf("decode simple chat response: %w", err)
+			}
+
+			c.logger.Debug().
+				Dur("duration_ms", time.Since(start)).
+				Int("reply_len", len(chatResp.Message.Content)).
+				Msg("[ollama] simple chat done")
+
+			return strings.TrimSpace(chatResp.Message.Content), nil
 }
 
 func (c *OllamaClient) ChatWithTools(ctx context.Context, messages []ChatMessage, format string) (*ChatResult, error) {
