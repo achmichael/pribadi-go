@@ -9,7 +9,7 @@ models/
 phases/*
 cmd/smoketest/*
 architecture.png
-app
+bin/app
 assets/temp/*
 whisper.cpp/*
 whisper_server/*

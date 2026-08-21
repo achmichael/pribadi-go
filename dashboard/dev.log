@@ -1,0 +1,20 @@
+
+> dashboard@0.1.0 dev
+> next dev
+
+▲ Next.js 16.3.1 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://100.106.82.125:3000
+✓ Ready in 1283ms
+⚠ `eslint` configuration in next.config.ts is no longer supported. See more info here: https://nextjs.org/docs/app/api-reference/cli/next#next-lint-options
+⚠ Invalid next.config.ts options detected: 
+⚠     Unrecognized key(s) in object: 'eslint'
+⚠ See more info here: https://nextjs.org/docs/messages/invalid-next-config
+✓ Running next.config.ts took 86ms
+
+○ Compiling / ...
+ GET / 200 in 11.6s (next.js: 10.8s, application-code: 820ms)
+ GET / 200 in 269ms (next.js: 34ms, application-code: 235ms)
+[browser] TypeError: NetworkError when attempting to fetch resource.
+[browser] TypeError: NetworkError when attempting to fetch resource.
+[?25h

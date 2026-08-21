@@ -49,19 +49,22 @@ export function FileUpload() {
       />
       
       <Tooltip>
-        <TooltipTrigger asChild>
-          <Button 
-            variant="ghost" 
-            size="icon" 
-            className="rounded-xl h-9 w-9 text-zinc-400 shrink-0 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={status === "uploading"}
+        <TooltipTrigger>
+          <div 
+            className="inline-flex cursor-pointer rounded-xl h-9 w-9 items-center justify-center text-zinc-400 shrink-0 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+            onClick={(e) => {
+              e.preventDefault();
+              if (status !== "uploading") {
+                fileInputRef.current?.click();
+              }
+            }}
+            data-disabled={status === "uploading"}
           >
             {status === "idle" && <Paperclip className="h-4 w-4" />}
             {status === "uploading" && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
             {status === "success" && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
             {status === "error" && <XCircle className="h-4 w-4 text-destructive" />}
-          </Button>
+          </div>
         </TooltipTrigger>
         <TooltipContent side="top">
           {status === "idle" ? "Upload document for RAG" : 
