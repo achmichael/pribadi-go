@@ -35,7 +35,7 @@ export function Sidebar() {
         setMessages(
           history.map((m: any) => ({
             id: m.id,
-            role: m.role, 
+            role: m.role,
             content: m.content,
             createdAt: m.created_at || new Date().toISOString(),
           })),
