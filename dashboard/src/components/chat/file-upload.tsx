@@ -1,77 +1,107 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Paperclip, Loader2, CheckCircle2, XCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useRef } from "react";
+import { Paperclip, X, FileText, Image } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { fetchApi } from "@/lib/api";
 
-export function FileUpload() {
+export interface AttachedFile {
+  file: File;
+  previewUrl: string | null;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isImageType(file: File): boolean {
+  return file.type.startsWith("image/");
+}
+
+interface FileUploadProps {
+  attachedFile: AttachedFile | null;
+  onFileSelect: (file: AttachedFile | null) => void;
+  disabled?: boolean;
+}
+
+export function FileUpload({ attachedFile, onFileSelect, disabled }: FileUploadProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [status, setStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
-  
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setStatus("uploading");
-    
-    const formData = new FormData();
-    formData.append("file", file);
+    const previewUrl = isImageType(file) ? URL.createObjectURL(file) : null;
+    onFileSelect({ file, previewUrl });
 
-    try {
-      const res = await fetch(`${process.env.NODE_ENV === 'development' ? 'http://localhost:8090/api/v1' : '/api/v1'}/chat/upload`, {
-        method: "POST",
-        headers: {
-          ...(typeof window !== 'undefined' && localStorage.getItem('token') ? { 'Authorization': `Bearer ${localStorage.getItem('token')}` } : {})
-        },
-        body: formData
-      });
-      
-      if (!res.ok) throw new Error("Upload failed");
-      setStatus("success");
-      setTimeout(() => setStatus("idle"), 3000);
-    } catch (err) {
-      console.error(err);
-      setStatus("error");
-      setTimeout(() => setStatus("idle"), 3000);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   };
 
+  const handleRemove = () => {
+    if (attachedFile?.previewUrl) {
+      URL.revokeObjectURL(attachedFile.previewUrl);
+    }
+    onFileSelect(null);
+  };
+
   return (
-    <>
-      <input 
-        type="file" 
-        className="hidden" 
-        ref={fileInputRef} 
-        onChange={handleUpload}
-        accept=".txt,.md,.pdf,.docx"
+    <div className="flex items-center gap-2">
+      <input
+        type="file"
+        className="hidden"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept=".txt,.md,.pdf,.docx,.png,.jpg,.jpeg,.webp"
       />
-      
+
       <Tooltip>
         <TooltipTrigger>
-          <div 
+          <div
             className="inline-flex cursor-pointer rounded-xl h-9 w-9 items-center justify-center text-zinc-400 shrink-0 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
             onClick={(e) => {
               e.preventDefault();
-              if (status !== "uploading") {
-                fileInputRef.current?.click();
-              }
+              if (!disabled) fileInputRef.current?.click();
             }}
-            data-disabled={status === "uploading"}
+            data-disabled={disabled}
           >
-            {status === "idle" && <Paperclip className="h-4 w-4" />}
-            {status === "uploading" && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
-            {status === "success" && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
-            {status === "error" && <XCircle className="h-4 w-4 text-destructive" />}
+            <Paperclip className="h-4 w-4" />
           </div>
         </TooltipTrigger>
-        <TooltipContent side="top">
-          {status === "idle" ? "Upload document for RAG" : 
-           status === "uploading" ? "Uploading and processing..." :
-           status === "success" ? "Added to context" : "Failed to upload"}
-        </TooltipContent>
+        <TooltipContent side="top">Attach file</TooltipContent>
       </Tooltip>
-    </>
+
+      {attachedFile && (
+        <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg border border-zinc-800 bg-zinc-900/50 max-w-[240px]">
+          {attachedFile.previewUrl ? (
+            <img
+              src={attachedFile.previewUrl}
+              alt="preview"
+              className="h-8 w-8 rounded object-cover shrink-0"
+            />
+          ) : (
+            <div className="h-8 w-8 rounded bg-zinc-800 flex items-center justify-center shrink-0">
+              <FileText className="h-4 w-4 text-zinc-400" />
+            </div>
+          )}
+          <div className="flex flex-col min-w-0">
+            <span className="text-[11px] text-zinc-300 truncate font-medium">
+              {attachedFile.file.name}
+            </span>
+            <span className="text-[10px] text-zinc-500">
+              {formatFileSize(attachedFile.file.size)}
+            </span>
+          </div>
+          <button
+            onClick={handleRemove}
+            className="shrink-0 p-0.5 rounded hover:bg-zinc-700 transition-colors"
+          >
+            <X className="h-3 w-3 text-zinc-400" />
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

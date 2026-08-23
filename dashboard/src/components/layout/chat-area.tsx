@@ -9,7 +9,7 @@ import { API_BASE, getAuthHeader } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ModelSwitcher } from "@/components/chat/model-switcher";
-import { FileUpload } from "@/components/chat/file-upload";
+import { FileUpload, type AttachedFile } from "@/components/chat/file-upload";
 import { ThinkingStages } from "@/components/chat/thinking-stages";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -20,9 +20,26 @@ const SUGGESTED_PROMPTS = [
   { icon: Sparkles, text: "What capabilities do you have?" },
 ];
 
+async function uploadFile(file: File, signal?: AbortSignal): Promise<string | null> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await fetch(`${API_BASE}/chat/upload`, {
+    method: "POST",
+    headers: { ...getAuthHeader() },
+    body: formData,
+    signal,
+  });
+
+  if (!res.ok) return null;
+  const job = await res.json();
+  return job.id || null;
+}
+
 export function ChatArea() {
   const [input, setInput] = useState("");
   const [model, setModel] = useState("local");
+  const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const {
     messages,
     addMessage,
@@ -61,15 +78,24 @@ export function ChatArea() {
 
   const handleSubmit = async (textToSubmit?: string) => {
     const text = textToSubmit || input;
-    if (!text.trim() || isStreaming) return;
+    const hasFile = !!attachedFile;
+    if ((!text.trim() && !hasFile) || isStreaming) return;
 
     setInput("");
+    const pendingFile = attachedFile;
+    setAttachedFile(null);
 
     const controller = new AbortController();
     setAbortController(controller);
 
+    const displayText = text.trim()
+      ? hasFile
+        ? `${text.trim()} [${pendingFile!.file.name}]`
+        : text.trim()
+      : `[${pendingFile!.file.name}]`;
+
     const tempId = Date.now().toString();
-    addMessage({ id: tempId, role: "user", content: text, createdAt: new Date().toISOString() });
+    addMessage({ id: tempId, role: "user", content: displayText, createdAt: new Date().toISOString() });
     setIsStreaming(true);
 
     const asstId = (Date.now() + 1).toString();
@@ -84,7 +110,7 @@ export function ChatArea() {
             "Content-Type": "application/json",
             ...getAuthHeader(),
           },
-          body: JSON.stringify({ message: text }),
+          body: JSON.stringify({ message: text || pendingFile?.file.name || "New Chat" }),
           signal: controller.signal,
         });
 
@@ -116,6 +142,14 @@ export function ChatArea() {
     }
 
     try {
+      let fileJobId = "";
+      if (pendingFile) {
+        fileJobId = (await uploadFile(pendingFile.file, controller.signal)) || "";
+        if (pendingFile.previewUrl) {
+          URL.revokeObjectURL(pendingFile.previewUrl);
+        }
+      }
+
       const res = await fetch(`${API_BASE}/chat/stream`, {
         method: "POST",
         headers: {
@@ -126,6 +160,7 @@ export function ChatArea() {
           message: text,
           session_id: currentSessionId,
           model: model,
+          file_job_id: fileJobId,
         }),
         signal: controller.signal,
       });
@@ -194,6 +229,8 @@ export function ChatArea() {
       setCurrentStage(null);
     }
   };
+
+  const canSubmit = input.trim() || attachedFile;
 
   return (
     <div className="flex flex-col h-full w-full mx-auto relative overflow-hidden bg-background">
@@ -364,7 +401,11 @@ export function ChatArea() {
               rows={1}
             />
             <div className="flex items-center justify-between p-2">
-              <FileUpload />
+              <FileUpload
+                attachedFile={attachedFile}
+                onFileSelect={setAttachedFile}
+                disabled={isStreaming}
+              />
               {isStreaming ? (
                 <Button
                   onClick={handleStop}
@@ -376,9 +417,9 @@ export function ChatArea() {
               ) : (
                 <Button
                   onClick={() => handleSubmit()}
-                  disabled={!input.trim()}
+                  disabled={!canSubmit}
                   size="icon"
-                  className={`rounded-xl h-9 w-9 transition-all duration-300 ${input.trim() ? "bg-white text-black hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"}`}
+                  className={`rounded-xl h-9 w-9 transition-all duration-300 ${canSubmit ? "bg-white text-black hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"}`}
                 >
                   <Send className="h-4 w-4" />
                 </Button>

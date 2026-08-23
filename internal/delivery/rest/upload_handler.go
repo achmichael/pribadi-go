@@ -1,15 +1,17 @@
 package rest
 
 import (
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/google/uuid"
+	"io"
 )
 
-// handleFileUpload handles multipart form data upload and triggers RAG ingestion
 func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseMultipartForm(32 << 20) // 32MB max memory
+	err := r.ParseMultipartForm(32 << 20)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "File too large")
 		return
@@ -24,14 +26,20 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 
 	userID := r.Context().Value("user_id").(string)
 
-	// Ensure temp dir exists
-	tempDir := "data/temp_uploads"
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
+	uploadDir := filepath.Join("data", "uploads", userID)
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		respondError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
 
-	savePath := filepath.Join(tempDir, header.Filename) // Using original name for now, should UUID in prod
+	origName := filepath.Base(header.Filename)
+	origName = strings.ReplaceAll(origName, "..", "")
+	origName = strings.ReplaceAll(origName, "/", "")
+	origName = strings.ReplaceAll(origName, "\\", "")
+
+	ext := filepath.Ext(origName)
+	diskName := uuid.New().String() + ext
+	savePath := filepath.Join(uploadDir, diskName)
 
 	dst, err := os.Create(savePath)
 	if err != nil {
@@ -50,13 +58,12 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) {
 		mimeType = "application/octet-stream"
 	}
 
-	job, err := s.webChatService.CreateUploadJob(r.Context(), userID, header.Filename, savePath, mimeType, header.Size)
+	job, err := s.webChatService.CreateUploadJob(r.Context(), userID, origName, savePath, mimeType, header.Size)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to create upload job")
 		return
 	}
 
-	// Trigger async processing
 	s.webChatService.ProcessUploadJobAsync(job.ID)
 
 	respondJSON(w, http.StatusAccepted, job)

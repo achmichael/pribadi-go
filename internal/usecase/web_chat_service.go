@@ -29,7 +29,7 @@ type WebChatService interface {
 	// Messages & Streaming
 	GetSessionHistory(ctx context.Context, sessionID string) ([]domain.WebChatMessage, error)
 	GenerateChatTitle(ctx context.Context, message string) (string, error)
-	StreamChat(ctx context.Context, userID, sessionID, message, model string) (<-chan ollama.StreamChunk, error)
+	StreamChat(ctx context.Context, userID, sessionID, message, model, fileJobID string) (<-chan ollama.StreamChunk, error)
 
 	// API Keys
 	SaveAPIKey(ctx context.Context, userID, provider, key string) error
@@ -146,7 +146,7 @@ func (s *webChatService) GetSessionHistory(ctx context.Context, sessionID string
 	return s.repo.ListMessages(ctx, sessionID)
 }
 
-func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, message, model string) (<-chan ollama.StreamChunk, error) {
+func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, message, model, fileJobID string) (<-chan ollama.StreamChunk, error) {
 	session, err := s.repo.GetSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
@@ -185,6 +185,33 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 	go func() {
 		defer close(interceptedStream)
 
+		if fileJobID != "" {
+			interceptedStream <- ollama.StreamChunk{
+				Stage: &ollama.StageEvent{Stage: "extracting_file", Message: "Processing attached file..."},
+			}
+
+			fileContent := s.waitAndExtractFile(ctx, fileJobID)
+
+			if ctx.Err() != nil {
+				return
+			}
+
+			if fileContent != "" {
+				lastIdx := len(oMessages) - 1
+				userText := oMessages[lastIdx].Content
+
+				if strings.TrimSpace(userText) == "" {
+					oMessages[lastIdx].Content = fmt.Sprintf("The user uploaded a file. Here is the extracted content:\n\n---\n%s\n---\n\nPlease analyze and summarize this document.", fileContent)
+				} else {
+					oMessages[lastIdx].Content = fmt.Sprintf("User instruction: %s\n\nAttached file content:\n\n---\n%s\n---\n\nFollow the user's instruction above. The file content is provided as supporting context.", userText, fileContent)
+				}
+
+				interceptedStream <- ollama.StreamChunk{
+					Stage: &ollama.StageEvent{Stage: "file_extracted", Message: "File content ready"},
+				}
+			}
+		}
+
 		interceptedStream <- ollama.StreamChunk{
 			Stage: &ollama.StageEvent{Stage: "retrieving_context", Tool: "qdrant_search", Message: "Searching documents..."},
 		}
@@ -196,9 +223,8 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 		}
 
 		if ragErr == nil && pCtx.HasResults {
-			contextText := "Context from user documents:\n" + pCtx.Context
 			lastIdx := len(oMessages) - 1
-			oMessages[lastIdx].Content = fmt.Sprintf("%s\n\n%s", oMessages[lastIdx].Content, contextText)
+			oMessages[lastIdx].Content = fmt.Sprintf("%s\n\nContext from user documents:\n%s", oMessages[lastIdx].Content, pCtx.Context)
 
 			interceptedStream <- ollama.StreamChunk{
 				Stage: &ollama.StageEvent{Stage: "context_retrieved", Tool: "qdrant_search", Message: fmt.Sprintf("Found %d relevant chunks", len(strings.Split(pCtx.Context, "\n\n")))},
@@ -263,6 +289,46 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 	}()
 
 	return interceptedStream, nil
+}
+
+func (s *webChatService) waitAndExtractFile(ctx context.Context, jobID string) string {
+	for i := 0; i < 30; i++ {
+		if ctx.Err() != nil {
+			return ""
+		}
+
+		job, err := s.repo.GetUploadJob(ctx, jobID)
+		if err != nil || job == nil {
+			return ""
+		}
+
+		if job.Status == "completed" || job.Status == "failed" {
+			if job.Status == "failed" {
+				s.logger.Warn().Str("job_id", jobID).Msg("File extraction failed")
+				return ""
+			}
+			fileBytes, err := os.ReadFile(job.FilePath)
+			if err != nil {
+				s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to read file for inline extraction")
+				return ""
+			}
+			text, err := s.extraction.ExtractText(ctx, fileBytes, job.MimeType)
+			if err != nil {
+				s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to extract text for inline use")
+				return ""
+			}
+			const maxLen = 8000
+			if len(text) > maxLen {
+				text = text[:maxLen] + "\n\n[... content truncated ...]"
+			}
+			return text
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	s.logger.Warn().Str("job_id", jobID).Msg("Timed out waiting for file processing")
+	return ""
 }
 
 // ─── API Keys ─────────────────────────────────────────────────────────────

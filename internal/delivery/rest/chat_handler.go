@@ -18,6 +18,7 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		Message   string `json:"message"`
 		SessionID string `json:"session_id"`
 		Model     string `json:"model"`
+		FileJobID string `json:"file_job_id"`
 	}
 	
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -38,7 +39,7 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value("user_id").(string)
 	ctx := r.Context()
 	
-	stream, err := s.webChatService.StreamChat(ctx, userID, req.SessionID, req.Message, req.Model)
+	stream, err := s.webChatService.StreamChat(ctx, userID, req.SessionID, req.Message, req.Model, req.FileJobID)
 	if err != nil {
 		sendSSEEvent(w, flusher, "error", map[string]string{"message": err.Error()})
 		log.Info().Int("rest", len(err.Error())).Msg("[error]" + err.Error())
