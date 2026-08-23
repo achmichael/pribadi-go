@@ -21,6 +21,7 @@ type ToolRegistry interface {
 type ChatMessage struct {
 	Role      string     `json:"role"`
 	Content   string     `json:"content"`
+	Thinking  string     `json:"thinking,omitempty"`
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 
@@ -65,9 +66,17 @@ type ChatResult struct {
 	ToolCalls []ToolCall
 }
 
+type StageEvent struct {
+	Stage   string `json:"stage"`
+	Tool    string `json:"tool,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
 type StreamChunk struct {
 	Content   string
+	Thinking  string
 	ToolCalls []ToolCall
+	Stage     *StageEvent
 	Done      bool
 	Err       error
 }
@@ -342,6 +351,10 @@ func (c *OllamaClient) doChatFull(ctx context.Context, messages []ChatMessage, f
 }
 
 func (c *OllamaClient) ChatStream(ctx context.Context, messages []ChatMessage, tools []Tool) (<-chan StreamChunk, error) {
+	return c.ChatStreamWithThink(ctx, messages, tools, false)
+}
+
+func (c *OllamaClient) ChatStreamWithThink(ctx context.Context, messages []ChatMessage, tools []Tool, think bool) (<-chan StreamChunk, error) {
 	tokenEst := estimateTokens(messages)
 	c.logger.Info().
 		Int("token_estimate", tokenEst).
@@ -353,7 +366,7 @@ func (c *OllamaClient) ChatStream(ctx context.Context, messages []ChatMessage, t
 		Messages: messages,
 		Stream:   true,
 		Tools:    tools,
-		Think:  false,
+		Think:  think,
 		Options: map[string]any{
 			"num_predict": 800,
 			"temperature": 0.7,
@@ -404,6 +417,7 @@ func (c *OllamaClient) ChatStream(ctx context.Context, messages []ChatMessage, t
 
 			ch <- StreamChunk{
 				Content:   chunk.Message.Content,
+				Thinking:  chunk.Message.Thinking,
 				ToolCalls: chunk.Message.ToolCalls,
 				Done:      chunk.Done,
 			}

@@ -7,12 +7,21 @@ export interface ToolCall {
   };
 }
 
+export interface StageEvent {
+  stage: string;
+  tool?: string;
+  message?: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  thinking?: string;
   toolCalls?: ToolCall[];
   createdAt: string;
+  interrupted?: boolean;
+  stages?: StageEvent[];
 }
 
 export interface Session {
@@ -27,6 +36,8 @@ interface ChatState {
   activeSessionId: string | null;
   messages: Message[];
   isStreaming: boolean;
+  currentStage: StageEvent | null;
+  abortController: AbortController | null;
   
   setSessions: (sessions: Session[]) => void;
   updateSession: (id: string, updates: Partial<Session>) => void;
@@ -34,8 +45,13 @@ interface ChatState {
   setActiveSessionId: (id: string | null) => void;
   setMessages: (messages: Message[]) => void;
   addMessage: (message: Message) => void;
-  appendStreamChunk: (chunk: string) => void;
+  appendStreamChunk: (chunk: string, toolCalls?: ToolCall[]) => void;
+  appendThinking: (thinking: string) => void;
+  setCurrentStage: (stage: StageEvent | null) => void;
+  addStageToLastMessage: (stage: StageEvent) => void;
+  markLastMessageInterrupted: () => void;
   setIsStreaming: (status: boolean) => void;
+  setAbortController: (controller: AbortController | null) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -43,6 +59,8 @@ export const useChatStore = create<ChatState>((set) => ({
   activeSessionId: null,
   messages: [],
   isStreaming: false,
+  currentStage: null,
+  abortController: null,
   
   setSessions: (sessions) => set({ sessions }),
   updateSession: (id, updates) => set((state) => ({
@@ -77,6 +95,49 @@ export const useChatStore = create<ChatState>((set) => ({
     
     return { messages: updatedMessages };
   }),
+
+  appendThinking: (thinking: string) => set((state) => {
+    const lastMsg = state.messages[state.messages.length - 1];
+    if (!lastMsg || lastMsg.role !== 'assistant') return state;
+
+    const updatedMessages = [...state.messages];
+    updatedMessages[updatedMessages.length - 1] = {
+      ...lastMsg,
+      thinking: (lastMsg.thinking || '') + thinking,
+    };
+    return { messages: updatedMessages };
+  }),
+
+  setCurrentStage: (stage) => set({ currentStage: stage }),
+
+  addStageToLastMessage: (stage: StageEvent) => set((state) => {
+    const lastMsg = state.messages[state.messages.length - 1];
+    if (!lastMsg || lastMsg.role !== 'assistant') return state;
+
+    const updatedMessages = [...state.messages];
+    updatedMessages[updatedMessages.length - 1] = {
+      ...lastMsg,
+      stages: [...(lastMsg.stages || []), stage],
+    };
+    return { messages: updatedMessages, currentStage: stage };
+  }),
+
+  markLastMessageInterrupted: () => set((state) => {
+    const lastMsg = state.messages[state.messages.length - 1];
+    if (!lastMsg || lastMsg.role !== 'assistant') return state;
+
+    const updatedMessages = [...state.messages];
+    updatedMessages[updatedMessages.length - 1] = {
+      ...lastMsg,
+      interrupted: true,
+    };
+    return { messages: updatedMessages };
+  }),
   
-  setIsStreaming: (status) => set({ isStreaming: status })
+  setIsStreaming: (status) => set((state) => ({
+    isStreaming: status,
+    currentStage: status ? state.currentStage : null,
+  })),
+
+  setAbortController: (controller) => set({ abortController: controller }),
 }));

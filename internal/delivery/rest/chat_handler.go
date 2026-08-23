@@ -7,7 +7,6 @@ import (
 	"github.com/achmichael/pribadi-go/internal/logger"
 )
 
-// handleChatStream handles SSE streaming for chat completion
 func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	var log = logger.New("info")
 	
@@ -49,15 +48,25 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	for chunk := range stream {
 		select {
 		case <-ctx.Done():
-			return // Client disconnected
+			sendSSEEvent(w, flusher, "interrupted", map[string]bool{"interrupted": true})
+			return
 		default:
 			if chunk.Err != nil {
 				sendSSEEvent(w, flusher, "error", map[string]string{"message": chunk.Err.Error()})
 				return
 			}
+
+			if chunk.Stage != nil {
+				sendSSEEvent(w, flusher, "stage", chunk.Stage)
+				continue
+			}
 			
 			if len(chunk.ToolCalls) > 0 {
 				sendSSEEvent(w, flusher, "tool", chunk.ToolCalls)
+			}
+
+			if chunk.Thinking != "" {
+				sendSSEEvent(w, flusher, "thinking", map[string]string{"content": chunk.Thinking})
 			}
 			
 			if chunk.Content != "" {

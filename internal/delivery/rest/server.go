@@ -69,7 +69,6 @@ func NewServer(service usecase.DashboardService, webChatService usecase.WebChatS
 	r.Use(middleware.RealIP)
 	r.Use(loggerMiddleware(logger))
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
 
 	// CORS config - Tightened for production
 	r.Use(cors.Handler(cors.Options{
@@ -100,6 +99,7 @@ func NewServer(service usecase.DashboardService, webChatService usecase.WebChatS
 		// Protected routes
 		r.Group(func(r chi.Router) {
 			r.Use(srv.authMiddleware)
+			r.Use(middleware.Timeout(60 * time.Second))
 
 			// Config
 			r.Get("/config", srv.handleGetConfigAll)
@@ -131,22 +131,26 @@ func NewServer(service usecase.DashboardService, webChatService usecase.WebChatS
 			r.Put("/stocks/{id}", srv.handleUpdateStock)
 			r.Delete("/stocks/{id}", srv.handleDeleteStock)
 
-			// Chat (Web UI)
+			// Chat (Web UI) - non-streaming
+			r.Get("/chat/sessions", srv.handleGetSessions)
+			r.Post("/chat/sessions", srv.handleCreateSession)
+			r.Put("/chat/sessions/{id}", srv.handleUpdateSession)
+			r.Delete("/chat/sessions/{id}", srv.handleDeleteSession)
+			r.Get("/chat/sessions/{id}/history", srv.handleGetSessionHistory)
+			r.Put("/chat/settings", srv.handleChatSettings)
+
+			// Rate limited non-streaming uploads
 			r.Group(func(r chi.Router) {
-				r.Get("/chat/sessions", srv.handleGetSessions)
-				r.Post("/chat/sessions", srv.handleCreateSession)
-				r.Put("/chat/sessions/{id}", srv.handleUpdateSession)
-				r.Delete("/chat/sessions/{id}", srv.handleDeleteSession)
-				r.Get("/chat/sessions/{id}/history", srv.handleGetSessionHistory)
-				r.Put("/chat/settings", srv.handleChatSettings)
-				
-				// Rate limited chat endpoints
-				r.Group(func(r chi.Router) {
-					r.Use(srv.chatRateLimitMiddleware)
-					r.Post("/chat/stream", srv.handleChatStream)
-					r.Post("/chat/upload", srv.handleFileUpload)
-				})
+				r.Use(srv.chatRateLimitMiddleware)
+				r.Post("/chat/upload", srv.handleFileUpload)
 			})
+		})
+
+		// SSE streaming - no timeout middleware (client disconnect cancels context)
+		r.Group(func(r chi.Router) {
+			r.Use(srv.authMiddleware)
+			r.Use(srv.chatRateLimitMiddleware)
+			r.Post("/chat/stream", srv.handleChatStream)
 		})
 	})
 

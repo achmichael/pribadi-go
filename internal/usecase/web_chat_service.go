@@ -147,7 +147,6 @@ func (s *webChatService) GetSessionHistory(ctx context.Context, sessionID string
 }
 
 func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, message, model string) (<-chan ollama.StreamChunk, error) {
-	// 1. Verify session belongs to user
 	session, err := s.repo.GetSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
@@ -156,7 +155,6 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 		return nil, errors.New("session not found or unauthorized")
 	}
 
-	// 2. Save User Message
 	userMsg := domain.WebChatMessage{
 		ID:        uuid.New().String(),
 		SessionID: sessionID,
@@ -167,11 +165,9 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 	}
 	_ = s.repo.CreateMessage(ctx, userMsg)
 
-	// 3. Build Chat History for Ollama
 	history, _ := s.repo.ListMessages(ctx, sessionID)
 	var oMessages []ollama.ChatMessage
 
-	// Prepend System Prompt if any (TODO: fetch from AgentConfig)
 	oMessages = append(oMessages, ollama.ChatMessage{
 		Role:    "system",
 		Content: "You are pribadi-go, a helpful AI assistant. Always respond in Markdown.",
@@ -184,32 +180,61 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 		})
 	}
 
-	// 4. Retrieve RAG Context (Optional, simplified for now)
-	// We search user documents using the full message as question, targetDocID = "" for all docs
-	pCtx, err := s.ragRetrieve.Retrieve(ctx, message, "")
-	if err == nil && pCtx.HasResults {
-		contextText := "Context from user documents:\n" + pCtx.Context
-		// Append to the last message (user message)
-		lastIdx := len(oMessages) - 1
-		oMessages[lastIdx].Content = fmt.Sprintf("%s\n\n%s", oMessages[lastIdx].Content, contextText)
-	}
+	interceptedStream := make(chan ollama.StreamChunk, 64)
 
-	// 5. Stream from Ollama
-	// TODO: Support BYOK models by routing to OpenAI/Anthropic SDKs here if model != "local"
-	stream, err := s.ollamaClient.ChatStream(ctx, oMessages, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	// 6. Intercept stream to save final assistant message
-	interceptedStream := make(chan ollama.StreamChunk)
 	go func() {
 		defer close(interceptedStream)
 
+		interceptedStream <- ollama.StreamChunk{
+			Stage: &ollama.StageEvent{Stage: "retrieving_context", Tool: "qdrant_search", Message: "Searching documents..."},
+		}
+
+		pCtx, ragErr := s.ragRetrieve.Retrieve(ctx, message, "")
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		if ragErr == nil && pCtx.HasResults {
+			contextText := "Context from user documents:\n" + pCtx.Context
+			lastIdx := len(oMessages) - 1
+			oMessages[lastIdx].Content = fmt.Sprintf("%s\n\n%s", oMessages[lastIdx].Content, contextText)
+
+			interceptedStream <- ollama.StreamChunk{
+				Stage: &ollama.StageEvent{Stage: "context_retrieved", Tool: "qdrant_search", Message: fmt.Sprintf("Found %d relevant chunks", len(strings.Split(pCtx.Context, "\n\n")))},
+			}
+		} else {
+			interceptedStream <- ollama.StreamChunk{
+				Stage: &ollama.StageEvent{Stage: "context_retrieved", Message: "No relevant documents found"},
+			}
+		}
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		interceptedStream <- ollama.StreamChunk{
+			Stage: &ollama.StageEvent{Stage: "generating", Message: "Generating response..."},
+		}
+
+		stream, streamErr := s.ollamaClient.ChatStreamWithThink(ctx, oMessages, nil, true)
+		if streamErr != nil {
+			interceptedStream <- ollama.StreamChunk{Err: streamErr}
+			return
+		}
+
 		var fullContent string
 		var toolCalls []ollama.ToolCall
+		interrupted := false
 
 		for chunk := range stream {
+			select {
+			case <-ctx.Done():
+				interrupted = true
+				goto save
+			default:
+			}
+
 			if chunk.Err == nil && !chunk.Done {
 				fullContent += chunk.Content
 				if len(chunk.ToolCalls) > 0 {
@@ -219,13 +244,17 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 			interceptedStream <- chunk
 		}
 
-		// Stream finished, save assistant message
+	save:
 		tcJSON, _ := json.Marshal(toolCalls)
+		content := fullContent
+		if interrupted {
+			content += "\n\n---\n*Generation stopped by user*"
+		}
 		asstMsg := domain.WebChatMessage{
 			ID:            uuid.New().String(),
 			SessionID:     sessionID,
 			Role:          "assistant",
-			Content:       fullContent,
+			Content:       content,
 			Model:         model,
 			ToolCallsJSON: string(tcJSON),
 			CreatedAt:     time.Now(),

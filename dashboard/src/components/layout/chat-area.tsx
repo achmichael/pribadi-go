@@ -1,16 +1,16 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Sparkles, Terminal, FileText, Database, Wrench } from "lucide-react";
+import { Send, Square, Sparkles, Terminal, FileText, Database, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useChatStore } from "@/store/chat";
 import { API_BASE, getAuthHeader } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ModelSwitcher } from "@/components/chat/model-switcher";
 import { FileUpload } from "@/components/chat/file-upload";
+import { ThinkingStages } from "@/components/chat/thinking-stages";
 import { motion, AnimatePresence } from "framer-motion";
 
 const SUGGESTED_PROMPTS = [
@@ -27,12 +27,19 @@ export function ChatArea() {
     messages,
     addMessage,
     appendStreamChunk,
+    appendThinking,
+    setCurrentStage,
+    addStageToLastMessage,
+    markLastMessageInterrupted,
     setIsStreaming,
     isStreaming,
+    currentStage,
     activeSessionId,
     setActiveSessionId,
     setSessions,
     sessions,
+    abortController,
+    setAbortController,
   } = useChatStore();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -42,11 +49,24 @@ export function ChatArea() {
     }
   }, [messages]);
 
+  const handleStop = () => {
+    if (abortController) {
+      abortController.abort();
+      markLastMessageInterrupted();
+      setIsStreaming(false);
+      setAbortController(null);
+      setCurrentStage(null);
+    }
+  };
+
   const handleSubmit = async (textToSubmit?: string) => {
     const text = textToSubmit || input;
     if (!text.trim() || isStreaming) return;
 
     setInput("");
+
+    const controller = new AbortController();
+    setAbortController(controller);
 
     const tempId = Date.now().toString();
     addMessage({ id: tempId, role: "user", content: text, createdAt: new Date().toISOString() });
@@ -56,36 +76,43 @@ export function ChatArea() {
     addMessage({ id: asstId, role: "assistant", content: "", createdAt: new Date().toISOString() });
 
     let currentSessionId = activeSessionId;
-    // if session id is not exist, this indices to create new chat session
     if (!activeSessionId) {
-      const res = await fetch(`${API_BASE}/chat/sessions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...getAuthHeader(),
-        },
-        body: JSON.stringify({
-          message: text,
-        }),
-      });
+      try {
+        const res = await fetch(`${API_BASE}/chat/sessions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...getAuthHeader(),
+          },
+          body: JSON.stringify({ message: text }),
+          signal: controller.signal,
+        });
 
-      if (!res.ok) {
-        if (res.status === 401 || res.status === 403) {
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem('token');
-            if (window.location.pathname !== '/login') {
-              window.location.href = '/login';
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            if (typeof window !== "undefined") {
+              localStorage.removeItem("token");
+              if (window.location.pathname !== "/login") {
+                window.location.href = "/login";
+              }
             }
+            throw new Error("Unauthorized");
           }
-          throw new Error('Unauthorized');
+          throw new Error("Create chat session failed");
         }
-        throw new Error("Create chat session failed");
-      }
 
-      const result = await res.json();
-      currentSessionId = result.id;
-      setActiveSessionId(result.id);
-      setSessions([...sessions, result]);
+        const result = await res.json();
+        currentSessionId = result.id;
+        setActiveSessionId(result.id);
+        setSessions([...sessions, result]);
+      } catch (e) {
+        if ((e as Error).name === "AbortError") {
+          setIsStreaming(false);
+          setAbortController(null);
+          return;
+        }
+        throw e;
+      }
     }
 
     try {
@@ -100,17 +127,18 @@ export function ChatArea() {
           session_id: currentSessionId,
           model: model,
         }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
         if (res.status === 401 || res.status === 403) {
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem('token');
-            if (window.location.pathname !== '/login') {
-              window.location.href = '/login';
+          if (typeof window !== "undefined") {
+            localStorage.removeItem("token");
+            if (window.location.pathname !== "/login") {
+              window.location.href = "/login";
             }
           }
-          throw new Error('Unauthorized');
+          throw new Error("Unauthorized");
         }
         throw new Error("Stream failed");
       }
@@ -141,6 +169,12 @@ export function ChatArea() {
                   appendStreamChunk(data.content, undefined);
                 } else if (eventType === "tool" && Array.isArray(data)) {
                   appendStreamChunk("", data);
+                } else if (eventType === "thinking" && data.content) {
+                  appendThinking(data.content);
+                } else if (eventType === "stage") {
+                  addStageToLastMessage(data);
+                } else if (eventType === "interrupted") {
+                  markLastMessageInterrupted();
                 }
               }
             }
@@ -148,20 +182,24 @@ export function ChatArea() {
         }
       }
     } catch (e) {
-      console.error(e);
-      appendStreamChunk("\n\n*Error: Failed to fetch response*", undefined);
+      if ((e as Error).name === "AbortError") {
+        markLastMessageInterrupted();
+      } else {
+        console.error(e);
+        appendStreamChunk("\n\n*Error: Failed to fetch response*", undefined);
+      }
     } finally {
       setIsStreaming(false);
+      setAbortController(null);
+      setCurrentStage(null);
     }
   };
 
   return (
     <div className="flex flex-col h-full w-full mx-auto relative overflow-hidden bg-background">
-      {/* Ambient background glows */}
       <div className="ambient-blob bg-blue-500/20 w-[600px] h-[600px] top-[-200px] right-[10%]"></div>
       <div className="ambient-blob bg-purple-500/10 w-[500px] h-[500px] bottom-[-100px] left-[5%]"></div>
 
-      {/* Header */}
       <div className="absolute top-0 w-full z-10 px-6 py-4 flex items-center justify-between">
         <ModelSwitcher model={model} setModel={setModel} />
       </div>
@@ -202,86 +240,108 @@ export function ChatArea() {
             </motion.div>
           ) : (
             <AnimatePresence>
-              {messages.map((m, idx) => (
-                <motion.div
-                  key={m.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex gap-4 items-start group"
-                >
-                  <div className="shrink-0 mt-1">
-                    {m.role === "user" ? (
-                      <div className="h-7 w-7 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 border border-white/10">
-                        YOU
-                      </div>
-                    ) : (
-                      <div className="h-7 w-7 rounded-md bg-white text-black flex items-center justify-center shadow-[0_0_15px_rgba(255,255,255,0.1)]">
-                        <Sparkles className="h-4 w-4" />
-                      </div>
-                    )}
-                  </div>
+              {messages.map((m, idx) => {
+                const isLastAssistant =
+                  m.role === "assistant" && m.id === messages[messages.length - 1]?.id;
 
-                  <div className="flex-1 space-y-2 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-zinc-200">
-                        {m.role === "user" ? "You" : "pribadi-go"}
-                      </span>
+                return (
+                  <motion.div
+                    key={m.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex gap-4 items-start group"
+                  >
+                    <div className="shrink-0 mt-1">
+                      {m.role === "user" ? (
+                        <div className="h-7 w-7 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 border border-white/10">
+                          YOU
+                        </div>
+                      ) : (
+                        <div className="h-7 w-7 rounded-md bg-white text-black flex items-center justify-center shadow-[0_0_15px_rgba(255,255,255,0.1)]">
+                          <Sparkles className="h-4 w-4" />
+                        </div>
+                      )}
                     </div>
 
-                    {m.toolCalls && m.toolCalls.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mb-2">
-                        {m.toolCalls.map((tc, tcIdx) => (
-                          <div
-                            key={tcIdx}
-                            className="inline-flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 px-2 py-1 rounded-md text-xs text-zinc-400 font-mono"
-                          >
-                            <Wrench className="h-3 w-3" />
-                            <span>{tc.function.name}</span>
-                          </div>
-                        ))}
+                    <div className="flex-1 space-y-2 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-zinc-200">
+                          {m.role === "user" ? "You" : "pribadi-go"}
+                        </span>
+                        {m.interrupted && (
+                          <span className="text-[10px] font-mono text-amber-500/70 border border-amber-500/20 px-1.5 py-0.5 rounded">
+                            stopped
+                          </span>
+                        )}
                       </div>
-                    )}
 
-                    {m.content && (
-                      <div className="prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            code({ node, inline, className, children, ...props }: any) {
-                              const match = /language-(\w+)/.exec(className || "");
-                              return !inline ? (
-                                <div className="relative rounded-lg overflow-hidden my-4 border border-zinc-800 bg-zinc-950">
-                                  <div className="bg-zinc-900 px-4 py-2 flex items-center text-xs text-zinc-400 font-mono border-b border-zinc-800">
-                                    {match?.[1] || "text"}
+                      {m.role === "assistant" && (m.stages?.length || m.thinking) && (
+                        <ThinkingStages
+                          stages={m.stages || []}
+                          currentStage={isLastAssistant && isStreaming ? currentStage : null}
+                          thinking={m.thinking}
+                          isActive={isLastAssistant && isStreaming}
+                        />
+                      )}
+
+                      {m.toolCalls && m.toolCalls.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {m.toolCalls.map((tc, tcIdx) => (
+                            <div
+                              key={tcIdx}
+                              className="inline-flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 px-2 py-1 rounded-md text-xs text-zinc-400 font-mono"
+                            >
+                              <Wrench className="h-3 w-3" />
+                              <span>{tc.function.name}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {m.content && (
+                        <div className="prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              code({ node, inline, className, children, ...props }: any) {
+                                const match = /language-(\w+)/.exec(className || "");
+                                return !inline ? (
+                                  <div className="relative rounded-lg overflow-hidden my-4 border border-zinc-800 bg-zinc-950">
+                                    <div className="bg-zinc-900 px-4 py-2 flex items-center text-xs text-zinc-400 font-mono border-b border-zinc-800">
+                                      {match?.[1] || "text"}
+                                    </div>
+                                    <pre className="p-4 m-0 overflow-x-auto text-sm font-mono leading-relaxed text-zinc-300">
+                                      <code className={className} {...props}>
+                                        {children}
+                                      </code>
+                                    </pre>
                                   </div>
-                                  <pre className="p-4 m-0 overflow-x-auto text-sm font-mono leading-relaxed text-zinc-300">
-                                    <code className={className} {...props}>
-                                      {children}
-                                    </code>
-                                  </pre>
-                                </div>
-                              ) : (
-                                <code
-                                  className="bg-zinc-800/50 text-zinc-200 px-1.5 py-0.5 rounded-md font-mono text-sm border border-zinc-800"
-                                  {...props}
-                                >
-                                  {children}
-                                </code>
-                              );
-                            },
-                          }}
-                        >
-                          {m.content}
-                        </ReactMarkdown>
-                      </div>
-                    )}
+                                ) : (
+                                  <code
+                                    className="bg-zinc-800/50 text-zinc-200 px-1.5 py-0.5 rounded-md font-mono text-sm border border-zinc-800"
+                                    {...props}
+                                  >
+                                    {children}
+                                  </code>
+                                );
+                              },
+                            }}
+                          >
+                            {m.content}
+                          </ReactMarkdown>
+                        </div>
+                      )}
 
-                    {isStreaming &&
-                      m.id === messages[messages.length - 1]?.id &&
-                      m.role === "assistant" && <span className="streaming-cursor" />}
-                  </div>
-                </motion.div>
-              ))}
+                      {isStreaming &&
+                        isLastAssistant &&
+                        !m.content && !m.thinking && <span className="streaming-cursor" />}
+                      {isStreaming &&
+                        isLastAssistant &&
+                        m.content && <span className="streaming-cursor" />}
+                    </div>
+                  </motion.div>
+                );
+              })}
             </AnimatePresence>
           )}
         </div>
@@ -305,14 +365,24 @@ export function ChatArea() {
             />
             <div className="flex items-center justify-between p-2">
               <FileUpload />
-              <Button
-                onClick={() => handleSubmit()}
-                disabled={!input.trim() || isStreaming}
-                size="icon"
-                className={`rounded-xl h-9 w-9 transition-all duration-300 ${input.trim() ? "bg-white text-black hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"}`}
-              >
-                <Send className="h-4 w-4" />
-              </Button>
+              {isStreaming ? (
+                <Button
+                  onClick={handleStop}
+                  size="icon"
+                  className="rounded-xl h-9 w-9 bg-red-500/80 text-white hover:bg-red-500 transition-all duration-300"
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                </Button>
+              ) : (
+                <Button
+                  onClick={() => handleSubmit()}
+                  disabled={!input.trim()}
+                  size="icon"
+                  className={`rounded-xl h-9 w-9 transition-all duration-300 ${input.trim() ? "bg-white text-black hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"}`}
+                >
+                  <Send className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           </div>
           <p className="text-[11px] text-center text-zinc-600 mt-3 font-medium">
