@@ -66,3 +66,39 @@ func (s *Server) handleGetSessionHistory(w http.ResponseWriter, r *http.Request)
 
 	respondJSON(w, http.StatusOK, history)
 }
+
+func (s *Server) handleUpdateSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+	userID := r.Context().Value("user_id").(string)
+
+	var req struct {
+		Title    *string `json:"title"`
+		IsPinned *bool   `json:"is_pinned"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	err := s.webChatService.UpdateSession(r.Context(), sessionID, userID, req.Title, req.IsPinned)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "id")
+	userID := r.Context().Value("user_id").(string)
+
+	err := s.webChatService.DeleteSession(r.Context(), sessionID, userID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}

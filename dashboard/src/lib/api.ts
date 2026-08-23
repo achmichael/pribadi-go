@@ -22,6 +22,15 @@ export const fetchApi = async (endpoint: string, options: RequestInit = {}) => {
   });
 
   if (!res.ok) {
+    if (res.status === 401 || res.status === 403) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('token');
+        // Prevent redirect loop if already on login page
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+      }
+    }
     throw new Error(await res.text());
   }
   return res.json();

@@ -41,11 +41,9 @@ export function SettingsModal() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" className="w-full justify-start gap-2 text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-300" asChild>
-          <div>
-            <Settings className="h-4 w-4" />
-            Settings
-          </div>
+        <Button variant="ghost" className="w-full justify-start gap-2 text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-300">
+          <Settings className="h-4 w-4" />
+          Settings
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-[500px] bg-zinc-950 border-white/10 text-zinc-200 p-0 overflow-hidden shadow-2xl">

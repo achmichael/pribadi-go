@@ -13,6 +13,8 @@ export function AuthCheck({ children }: { children: React.ReactNode }) {
     const token = localStorage.getItem("token");
     if (!token && pathname !== "/login") {
       router.push("/login");
+    } else if (token && pathname === "/login") {
+      router.push("/");
     }
   }, [pathname, router]);
 

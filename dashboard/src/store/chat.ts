@@ -19,6 +19,7 @@ export interface Session {
   id: string;
   title: string;
   updatedAt: string;
+  is_pinned?: boolean;
 }
 
 interface ChatState {
@@ -28,6 +29,8 @@ interface ChatState {
   isStreaming: boolean;
   
   setSessions: (sessions: Session[]) => void;
+  updateSession: (id: string, updates: Partial<Session>) => void;
+  removeSession: (id: string) => void;
   setActiveSessionId: (id: string | null) => void;
   setMessages: (messages: Message[]) => void;
   addMessage: (message: Message) => void;
@@ -42,6 +45,13 @@ export const useChatStore = create<ChatState>((set) => ({
   isStreaming: false,
   
   setSessions: (sessions) => set({ sessions }),
+  updateSession: (id, updates) => set((state) => ({
+    sessions: state.sessions.map((s) => (s.id === id ? { ...s, ...updates } : s)),
+  })),
+  removeSession: (id) => set((state) => ({
+    sessions: state.sessions.filter((s) => s.id !== id),
+    activeSessionId: state.activeSessionId === id ? null : state.activeSessionId,
+  })),
   setActiveSessionId: (id) => set({ activeSessionId: id }),
   setMessages: (messages) => set({ messages }),
   

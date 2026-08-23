@@ -69,7 +69,18 @@ export function ChatArea() {
         }),
       });
 
-      if (!res.ok) throw new Error("Create chat session failed");
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('token');
+            if (window.location.pathname !== '/login') {
+              window.location.href = '/login';
+            }
+          }
+          throw new Error('Unauthorized');
+        }
+        throw new Error("Create chat session failed");
+      }
 
       const result = await res.json();
       currentSessionId = result.id;
@@ -91,7 +102,18 @@ export function ChatArea() {
         }),
       });
 
-      if (!res.ok) throw new Error("Stream failed");
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('token');
+            if (window.location.pathname !== '/login') {
+              window.location.href = '/login';
+            }
+          }
+          throw new Error('Unauthorized');
+        }
+        throw new Error("Stream failed");
+      }
 
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();

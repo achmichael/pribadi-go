@@ -1,31 +1,48 @@
 "use client";
 
-import { useEffect } from "react";
-import { MessageSquare, Plus, Command, LogOut } from "lucide-react";
+import { useEffect, useState } from "react";
+import { MessageSquare, Plus, Command, LogOut, MoreHorizontal, Pin, Edit2, Share, Trash, Archive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useChatStore } from "@/store/chat";
 import { fetchApi } from "@/lib/api";
 import { useRouter } from "next/navigation";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 
 import { SettingsModal } from "@/components/chat/settings-modal";
+import { Input } from "@/components/ui/input";
 
 export function Sidebar() {
-  const { sessions, setSessions, setActiveSessionId, activeSessionId, setMessages } =
+  const { sessions, setSessions, updateSession, removeSession, setActiveSessionId, activeSessionId, setMessages } =
     useChatStore();
   const router = useRouter();
+
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
 
   useEffect(() => {
     fetchApi("/chat/sessions")
       .then((data) => {
         if (Array.isArray(data)) setSessions(data);
       })
-      .catch(console.error);
+      .catch((e) => {
+        if (e.message !== 'Unauthorized') {
+          console.error(e);
+        }
+      });
   }, []);
 
-  const sortedSessions = [...sessions].sort(
-    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-  );
+  const sortedSessions = [...sessions].sort((a, b) => {
+    if (a.is_pinned && !b.is_pinned) return -1;
+    if (!a.is_pinned && b.is_pinned) return 1;
+    return new Date(b.updated_at || b.updatedAt).getTime() - new Date(a.updated_at || a.updatedAt).getTime();
+  });
 
   const loadSession = async (id: string) => {
     setActiveSessionId(id);
@@ -41,7 +58,11 @@ export function Sidebar() {
           })),
         );
       }
-    } catch (e) {
+    } catch (e: any) {
+      if (e.message === 'Unauthorized') {
+         // fetchApi will handle redirect
+         return;
+      }
       console.error("Failed to load history", e);
     }
   };
@@ -54,6 +75,47 @@ export function Sidebar() {
   const handleLogout = () => {
     localStorage.removeItem("token");
     router.push("/login");
+  };
+
+  const handleAction = async (e: React.MouseEvent, action: string, session: any) => {
+    e.stopPropagation();
+    try {
+      if (action === 'delete') {
+        await fetchApi(`/chat/sessions/${session.id}`, { method: 'DELETE' });
+        removeSession(session.id);
+        if (activeSessionId === session.id) createNewSession();
+      } else if (action === 'pin') {
+        const newPinnedState = !session.is_pinned;
+        await fetchApi(`/chat/sessions/${session.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ is_pinned: newPinnedState }),
+        });
+        updateSession(session.id, { is_pinned: newPinnedState });
+      } else if (action === 'rename') {
+        setEditingId(session.id);
+        setEditTitle(session.title || "New Thread");
+      }
+    } catch (err) {
+      console.error(`Failed to ${action} session`, err);
+    }
+  };
+
+  const handleRenameSubmit = async (e: React.KeyboardEvent | React.FocusEvent, id: string) => {
+    if (e.type === 'keydown' && (e as React.KeyboardEvent).key !== 'Enter') return;
+    
+    try {
+      if (editTitle.trim()) {
+        await fetchApi(`/chat/sessions/${id}`, {
+          method: 'PUT',
+          body: JSON.stringify({ title: editTitle.trim() }),
+        });
+        updateSession(id, { title: editTitle.trim() });
+      }
+    } catch (err) {
+      console.error("Failed to rename session", err);
+    } finally {
+      setEditingId(null);
+    }
   };
 
   return (
@@ -84,20 +146,70 @@ export function Sidebar() {
             <div className="px-3 py-4 text-xs text-zinc-600 font-medium">No previous threads.</div>
           ) : (
             sortedSessions.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => loadSession(s.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors text-left ${
-                  activeSessionId === s.id
-                    ? "bg-zinc-800/60 text-zinc-200 font-medium"
-                    : "text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-300"
-                }`}
-              >
-                <MessageSquare
-                  className={`h-4 w-4 shrink-0 ${activeSessionId === s.id ? "text-zinc-300" : "text-zinc-600"}`}
-                />
-                <span className="truncate">{s.title || "New Thread"}</span>
-              </button>
+              <div key={s.id} className="group relative">
+                <button
+                  onClick={() => loadSession(s.id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors text-left pr-16 ${
+                    activeSessionId === s.id
+                      ? "bg-zinc-800/60 text-zinc-200 font-medium"
+                      : "text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-300"
+                  }`}
+                >
+                  <MessageSquare
+                    className={`h-4 w-4 shrink-0 ${activeSessionId === s.id ? "text-zinc-300" : "text-zinc-600"}`}
+                  />
+                  {editingId === s.id ? (
+                    <Input
+                      autoFocus
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      onBlur={(e) => handleRenameSubmit(e, s.id)}
+                      onKeyDown={(e) => handleRenameSubmit(e, s.id)}
+                      className="h-6 text-sm bg-zinc-900 border-zinc-700 focus-visible:ring-1 focus-visible:ring-zinc-500 px-1"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <span className="truncate">{s.title || "New Thread"}</span>
+                  )}
+                </button>
+                
+                {editingId !== s.id && (
+                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => handleAction(e, 'pin', s)}
+                      className={`p-1 rounded hover:bg-zinc-700/50 ${s.is_pinned ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      <Pin className="h-3.5 w-3.5" />
+                    </button>
+                    
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          onClick={(e) => e.stopPropagation()}
+                          className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50"
+                        >
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48 bg-zinc-950 border-white/10 text-zinc-300">
+                        <DropdownMenuItem onClick={(e) => handleAction(e as any, 'rename', s)} className="gap-2 cursor-pointer focus:bg-zinc-800 focus:text-white">
+                          <Edit2 className="h-4 w-4" /> Rename
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => handleAction(e as any, 'share', s)} className="gap-2 cursor-pointer focus:bg-zinc-800 focus:text-white">
+                          <Share className="h-4 w-4" /> Share
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={(e) => handleAction(e as any, 'archive', s)} className="gap-2 cursor-pointer focus:bg-zinc-800 focus:text-white">
+                          <Archive className="h-4 w-4" /> Archive
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator className="bg-white/10" />
+                        <DropdownMenuItem onClick={(e) => handleAction(e as any, 'delete', s)} className="gap-2 cursor-pointer text-red-400 focus:bg-red-500/10 focus:text-red-300">
+                          <Trash className="h-4 w-4" /> Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                )}
+              </div>
             ))
           )}
         </div>

@@ -23,6 +23,7 @@ type WebChatService interface {
 	CreateSession(ctx context.Context, userID, title string) (*domain.WebChatSession, error)
 	GetSession(ctx context.Context, sessionID string) (*domain.WebChatSession, error)
 	ListSessions(ctx context.Context, userID string) ([]domain.WebChatSession, error)
+	UpdateSession(ctx context.Context, sessionID, userID string, title *string, isPinned *bool) error
 	DeleteSession(ctx context.Context, sessionID, userID string) error
 
 	// Messages & Streaming
@@ -114,6 +115,25 @@ func (s *webChatService) GetSession(ctx context.Context, sessionID string) (*dom
 
 func (s *webChatService) ListSessions(ctx context.Context, userID string) ([]domain.WebChatSession, error) {
 	return s.repo.ListSessions(ctx, userID)
+}
+
+func (s *webChatService) UpdateSession(ctx context.Context, sessionID, userID string, title *string, isPinned *bool) error {
+	session, err := s.repo.GetSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil || session.UserID != userID {
+		return errors.New("session not found or unauthorized")
+	}
+
+	if title != nil {
+		session.Title = *title
+	}
+	if isPinned != nil {
+		session.IsPinned = *isPinned
+	}
+
+	return s.repo.UpdateSession(ctx, *session)
 }
 
 func (s *webChatService) DeleteSession(ctx context.Context, sessionID, userID string) error {

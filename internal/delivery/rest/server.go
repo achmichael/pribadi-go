@@ -135,6 +135,8 @@ func NewServer(service usecase.DashboardService, webChatService usecase.WebChatS
 			r.Group(func(r chi.Router) {
 				r.Get("/chat/sessions", srv.handleGetSessions)
 				r.Post("/chat/sessions", srv.handleCreateSession)
+				r.Put("/chat/sessions/{id}", srv.handleUpdateSession)
+				r.Delete("/chat/sessions/{id}", srv.handleDeleteSession)
 				r.Get("/chat/sessions/{id}/history", srv.handleGetSessionHistory)
 				r.Put("/chat/settings", srv.handleChatSettings)
 				
