@@ -22,6 +22,10 @@ export interface Message {
   createdAt: string;
   interrupted?: boolean;
   stages?: StageEvent[];
+  file_job_id?: string;
+  file_name?: string;
+  file_mime_type?: string;
+  file_size?: number;
 }
 
 export interface Session {

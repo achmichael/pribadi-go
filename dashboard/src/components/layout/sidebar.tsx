@@ -46,30 +46,13 @@ export function Sidebar() {
 
   const loadSession = async (id: string) => {
     setActiveSessionId(id);
-    try {
-      const history = await fetchApi(`/chat/sessions/${id}/history`);
-      if (Array.isArray(history)) {
-        setMessages(
-          history.map((m: any) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            createdAt: m.created_at || new Date().toISOString(),
-          })),
-        );
-      }
-    } catch (e: any) {
-      if (e.message === 'Unauthorized') {
-         // fetchApi will handle redirect
-         return;
-      }
-      console.error("Failed to load history", e);
-    }
+    router.push(`/chat/${id}`);
   };
 
   const createNewSession = () => {
     setActiveSessionId(null);
     setMessages([]);
+    router.push('/new');
   };
 
   const handleLogout = () => {
@@ -145,18 +128,22 @@ export function Sidebar() {
           {sortedSessions.length === 0 ? (
             <div className="px-3 py-4 text-xs text-zinc-600 font-medium">No previous threads.</div>
           ) : (
-            sortedSessions.map((s) => (
+            sortedSessions.map((s) => {
+              // Ensure we check routing/store active state correctly
+              const isActive = activeSessionId === s.id;
+              
+              return (
               <div key={s.id} className="group relative">
                 <button
                   onClick={() => loadSession(s.id)}
                   className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors text-left pr-16 ${
-                    activeSessionId === s.id
+                    isActive
                       ? "bg-zinc-800/60 text-zinc-200 font-medium"
                       : "text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-300"
                   }`}
                 >
                   <MessageSquare
-                    className={`h-4 w-4 shrink-0 ${activeSessionId === s.id ? "text-zinc-300" : "text-zinc-600"}`}
+                    className={`h-4 w-4 shrink-0 ${isActive ? "text-zinc-300" : "text-zinc-600"}`}
                   />
                   {editingId === s.id ? (
                     <Input
@@ -210,7 +197,8 @@ export function Sidebar() {
                   </div>
                 )}
               </div>
-            ))
+            );
+          })
           )}
         </div>
       </ScrollArea>

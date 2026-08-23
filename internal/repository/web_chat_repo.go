@@ -94,8 +94,8 @@ func (r *webChatRepo) DeleteSession(ctx context.Context, sessionID, userID strin
 
 func (r *webChatRepo) CreateMessage(ctx context.Context, m domain.WebChatMessage) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO web_chat_messages (id, session_id, role, content, model, tool_calls_json, token_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.SessionID, m.Role, m.Content, m.Model, m.ToolCallsJSON, m.TokenCount, m.CreatedAt,
+		`INSERT INTO web_chat_messages (id, session_id, role, content, model, tool_calls_json, token_count, created_at, file_job_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.SessionID, m.Role, m.Content, m.Model, m.ToolCallsJSON, m.TokenCount, m.CreatedAt, m.FileJobID,
 	)
 	if err == nil {
 		r.db.ExecContext(ctx, `UPDATE web_chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, m.SessionID)
@@ -104,7 +104,14 @@ func (r *webChatRepo) CreateMessage(ctx context.Context, m domain.WebChatMessage
 }
 
 func (r *webChatRepo) ListMessages(ctx context.Context, sessionID string) ([]domain.WebChatMessage, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id, session_id, role, content, model, tool_calls_json, token_count, created_at FROM web_chat_messages WHERE session_id = ? ORDER BY created_at ASC`, sessionID)
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT 
+			m.id, m.session_id, m.role, m.content, m.model, m.tool_calls_json, m.token_count, m.created_at, m.file_job_id,
+			j.file_name, j.mime_type, j.file_size
+		FROM web_chat_messages m
+		LEFT JOIN web_upload_jobs j ON m.file_job_id = j.id
+		WHERE m.session_id = ? 
+		ORDER BY m.created_at ASC`, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -114,12 +121,34 @@ func (r *webChatRepo) ListMessages(ctx context.Context, sessionID string) ([]dom
 	for rows.Next() {
 		var m domain.WebChatMessage
 		var tc sql.NullString
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Model, &tc, &m.TokenCount, &m.CreatedAt); err != nil {
+		var fileJobID sql.NullString
+		var fileName sql.NullString
+		var mimeType sql.NullString
+		var fileSize sql.NullInt64
+
+		if err := rows.Scan(
+			&m.ID, &m.SessionID, &m.Role, &m.Content, &m.Model, &tc, &m.TokenCount, &m.CreatedAt, &fileJobID,
+			&fileName, &mimeType, &fileSize,
+		); err != nil {
 			return nil, err
 		}
+		
 		if tc.Valid {
 			m.ToolCallsJSON = tc.String
 		}
+		if fileJobID.Valid {
+			m.FileJobID = fileJobID.String
+		}
+		if fileName.Valid {
+			m.FileName = fileName.String
+		}
+		if mimeType.Valid {
+			m.FileMimeType = mimeType.String
+		}
+		if fileSize.Valid {
+			m.FileSize = fileSize.Int64
+		}
+		
 		res = append(res, m)
 	}
 	return res, nil

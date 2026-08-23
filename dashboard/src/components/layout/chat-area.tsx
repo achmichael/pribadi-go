@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { Send, Square, Sparkles, Terminal, FileText, Database, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useChatStore } from "@/store/chat";
-import { API_BASE, getAuthHeader } from "@/lib/api";
+import { API_BASE, getAuthHeader, fetchApi } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ModelSwitcher } from "@/components/chat/model-switcher";
@@ -40,6 +41,11 @@ export function ChatArea() {
   const [input, setInput] = useState("");
   const [model, setModel] = useState("local");
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const params = useParams();
+  const router = useRouter();
+  
   const {
     messages,
     addMessage,
@@ -53,6 +59,7 @@ export function ChatArea() {
     currentStage,
     activeSessionId,
     setActiveSessionId,
+    setMessages,
     setSessions,
     sessions,
     abortController,
@@ -60,11 +67,58 @@ export function ChatArea() {
   } = useChatStore();
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Sync route params with store state
+  useEffect(() => {
+    const routeSessionId = params?.sessionId as string | undefined;
+    
+    // If we're on /new, ensure state is clear
+    if (!routeSessionId) {
+      if (activeSessionId) setActiveSessionId(null);
+      if (messages.length > 0) setMessages([]);
+      return;
+    }
+    
+    // If route has sessionId but store doesn't match, update store and fetch
+    if (routeSessionId && activeSessionId !== routeSessionId) {
+      setActiveSessionId(routeSessionId);
+      
+      setIsLoadingHistory(true);
+      setHistoryError(null);
+      
+      fetchApi(`/chat/sessions/${routeSessionId}/history`)
+        .then((history) => {
+          if (Array.isArray(history)) {
+            setMessages(
+              history.map((m: any) => ({
+                id: m.id,
+                role: m.role,
+                content: m.content,
+                createdAt: m.created_at || new Date().toISOString(),
+                file_job_id: m.file_job_id,
+                file_name: m.file_name,
+                file_mime_type: m.file_mime_type,
+                file_size: m.file_size
+              }))
+            );
+          }
+        })
+        .catch((e) => {
+          if (e.message !== 'Unauthorized') {
+            console.error("Failed to load history", e);
+            setHistoryError("Failed to load conversation history");
+          }
+        })
+        .finally(() => {
+          setIsLoadingHistory(false);
+        });
+    }
+  }, [params?.sessionId, activeSessionId, setActiveSessionId, setMessages]);
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isLoadingHistory]);
 
   const handleStop = () => {
     if (abortController) {
@@ -88,14 +142,30 @@ export function ChatArea() {
     const controller = new AbortController();
     setAbortController(controller);
 
-    const displayText = text.trim()
-      ? hasFile
-        ? `${text.trim()} [${pendingFile!.file.name}]`
-        : text.trim()
-      : `[${pendingFile!.file.name}]`;
+    const displayText = text.trim();
 
     const tempId = Date.now().toString();
-    addMessage({ id: tempId, role: "user", content: displayText, createdAt: new Date().toISOString() });
+    const newUserMessage: any = { 
+      id: tempId, 
+      role: "user", 
+      content: displayText, 
+      createdAt: new Date().toISOString()
+    };
+    
+    if (pendingFile) {
+      // Add fake/local properties for optimistic UI if possible, 
+      // but file_name is enough for basic display
+      newUserMessage.file_name = pendingFile.file.name;
+      newUserMessage.file_size = pendingFile.file.size;
+      newUserMessage.file_mime_type = pendingFile.file.type;
+      
+      // Store previewUrl internally in message if we want to render image preview
+      // (This is a temporary hack for immediate display before refresh)
+      if (pendingFile.previewUrl) {
+         newUserMessage._localPreview = pendingFile.previewUrl;
+      }
+    }
+    addMessage(newUserMessage);
     setIsStreaming(true);
 
     const asstId = (Date.now() + 1).toString();
@@ -131,6 +201,9 @@ export function ChatArea() {
         currentSessionId = result.id;
         setActiveSessionId(result.id);
         setSessions([...sessions, result]);
+        
+        // Use history replace to silently update URL without remounting ChatArea
+        window.history.replaceState(null, '', `/chat/${result.id}`);
       } catch (e) {
         if ((e as Error).name === "AbortError") {
           setIsStreaming(false);
@@ -145,9 +218,8 @@ export function ChatArea() {
       let fileJobId = "";
       if (pendingFile) {
         fileJobId = (await uploadFile(pendingFile.file, controller.signal)) || "";
-        if (pendingFile.previewUrl) {
-          URL.revokeObjectURL(pendingFile.previewUrl);
-        }
+        // Don't revoke URL here since we might need it for optimistic UI
+        // We can just rely on normal browser garbage collection or clean up on unmount
       }
 
       const res = await fetch(`${API_BASE}/chat/stream`, {
@@ -243,7 +315,15 @@ export function ChatArea() {
 
       <div className="flex-1 overflow-y-auto px-4 md:px-8 mt-16 z-10" ref={scrollRef}>
         <div className="max-w-3xl mx-auto space-y-8 pb-32">
-          {messages.length === 0 ? (
+          {isLoadingHistory ? (
+            <div className="flex justify-center items-center h-full mt-32">
+              <div className="animate-spin h-6 w-6 border-2 border-zinc-500 border-t-transparent rounded-full" />
+            </div>
+          ) : historyError ? (
+            <div className="flex justify-center items-center h-full mt-32 text-red-400">
+              {historyError}
+            </div>
+          ) : messages.length === 0 ? (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -311,6 +391,34 @@ export function ChatArea() {
                           </span>
                         )}
                       </div>
+
+                      {m.role === "user" && m.file_name && (
+                        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/50 max-w-[240px] mb-2 mt-1">
+                          {(m as any)._localPreview || (m.file_mime_type && m.file_mime_type.startsWith('image/')) ? (
+                            <img
+                              src={(m as any)._localPreview || '/placeholder-image.png'}
+                              alt="preview"
+                              className="h-8 w-8 rounded object-cover shrink-0"
+                            />
+                          ) : (
+                            <div className="h-8 w-8 rounded bg-zinc-800 flex items-center justify-center shrink-0">
+                              <FileText className="h-4 w-4 text-zinc-400" />
+                            </div>
+                          )}
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-[11px] text-zinc-300 truncate font-medium">
+                              {m.file_name}
+                            </span>
+                            {m.file_size && (
+                              <span className="text-[10px] text-zinc-500">
+                                {m.file_size < 1024 ? `${m.file_size} B` : 
+                                 m.file_size < 1024 * 1024 ? `${(m.file_size / 1024).toFixed(1)} KB` : 
+                                 `${(m.file_size / (1024 * 1024)).toFixed(1)} MB`}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
                       {m.role === "assistant" && (m.stages?.length || m.thinking) && (
                         <ThinkingStages

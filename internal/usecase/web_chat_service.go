@@ -161,6 +161,7 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 		Role:      "user",
 		Content:   message,
 		Model:     model,
+		FileJobID: fileJobID,
 		CreatedAt: time.Now(),
 	}
 	_ = s.repo.CreateMessage(ctx, userMsg)
@@ -216,7 +217,15 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 			Stage: &ollama.StageEvent{Stage: "retrieving_context", Tool: "qdrant_search", Message: "Searching documents..."},
 		}
 
-		pCtx, ragErr := s.ragRetrieve.Retrieve(ctx, message, "")
+		targetDocID := ""
+		if fileJobID != "" {
+			job, _ := s.repo.GetUploadJob(ctx, fileJobID)
+			if job != nil && job.DocumentID != "" {
+				targetDocID = job.DocumentID
+			}
+		}
+
+		pCtx, ragErr := s.ragRetrieve.Retrieve(ctx, message, targetDocID)
 
 		if ctx.Err() != nil {
 			return
@@ -420,12 +429,15 @@ func (s *webChatService) ProcessUploadJobAsync(jobID string) {
 			return
 		}
 
+		docID := uuid.New().String() // Generating docID here since IngestText returns chunk count
+		
 		// 3. Ingest Document
 		chunks, err := s.ragIngest.IngestText(ctx, text, map[string]string{
 			"source": "web_dashboard",
 			"source_file": job.FileName,
 			"mime_type": job.MimeType,
 			"user_id": job.UserID,
+			"document_id": docID,
 		})
 
 		// 4. Mark completed/failed
@@ -435,7 +447,6 @@ func (s *webChatService) ProcessUploadJobAsync(jobID string) {
 			return
 		}
 
-		docID := uuid.New().String() // Generating docID here since IngestText returns chunk count
 		s.logger.Info().Str("job_id", jobID).Int("chunks", chunks).Msg("RAG ingestion completed")
 		_ = s.repo.UpdateUploadJobStatus(ctx, jobID, "completed", "", docID)
 	}()

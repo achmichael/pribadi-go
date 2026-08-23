@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS web_chat_messages (
     model TEXT NOT NULL, -- local, openai, anthropic, dll
     tool_calls_json TEXT, -- menyimpan call tool kalau ada
     token_count INTEGER NOT NULL DEFAULT 0,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    file_job_id TEXT REFERENCES web_upload_jobs(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_web_chat_messages_session ON web_chat_messages(session_id);

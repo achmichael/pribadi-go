@@ -22,6 +22,10 @@ type WebChatMessage struct {
 	ToolCallsJSON string    `json:"tool_calls_json,omitempty"`
 	TokenCount    int       `json:"token_count"`
 	CreatedAt     time.Time `json:"created_at"`
+	FileJobID     string    `json:"file_job_id,omitempty"`
+	FileName      string    `json:"file_name,omitempty"`
+	FileMimeType  string    `json:"file_mime_type,omitempty"`
+	FileSize      int64     `json:"file_size,omitempty"`
 }
 
 // UserAPIKey represents an encrypted BYOK API key.
