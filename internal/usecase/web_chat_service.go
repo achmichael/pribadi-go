@@ -510,7 +510,7 @@ func (s *webChatService) ProcessUploadJobAsync(jobID string) {
 			Str("document_id", docID).
 			Str("user_id", job.UserID).
 			Msg("[AUDIT] WebChatService ProcessUploadJobAsync preparing to ingest text")
-			
+
 		// 3. Ingest Document
 		chunks, err := s.ragIngest.IngestText(ctx, text, map[string]string{
 			"source":      "web_dashboard",
