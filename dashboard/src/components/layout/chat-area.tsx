@@ -70,11 +70,15 @@ export function ChatArea() {
   // Sync route params with store state
   useEffect(() => {
     const routeSessionId = params?.sessionId as string | undefined;
+    const currentState = useChatStore.getState();
     
     // If we're on /new, ensure state is clear
     if (!routeSessionId) {
-      if (activeSessionId) setActiveSessionId(null);
-      if (messages.length > 0) setMessages([]);
+      // Don't clear state if we just started streaming (e.g. transitioning from /new to /chat/[id])
+      if (!currentState.isStreaming) {
+        if (activeSessionId) setActiveSessionId(null);
+        if (messages.length > 0) setMessages([]);
+      }
       return;
     }
     
@@ -202,8 +206,8 @@ export function ChatArea() {
         setActiveSessionId(result.id);
         setSessions([...sessions, result]);
         
-        // Use history replace to silently update URL without remounting ChatArea
-        window.history.replaceState(null, '', `/chat/${result.id}`);
+        // Use Next.js router to gracefully replace the URL
+        router.replace(`/chat/${result.id}`);
       } catch (e) {
         if ((e as Error).name === "AbortError") {
           setIsStreaming(false);
