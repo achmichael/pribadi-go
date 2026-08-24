@@ -47,6 +47,13 @@ func (s *ingestionService) IngestText(ctx context.Context, text string, metadata
 	if err != nil {
 		return 0, fmt.Errorf("chunking failed: %w", err)
 	}
+	
+	if len(chunks) > 0 {
+		s.logger.Info().
+			Str("source", sourceFile).
+			Int("chunk_0_len", len(chunks[0].Content)).
+			Msg("[AUDIT] ingestionService chunk 0 length")
+	}
 
 	s.logger.Info().
 		Str("source", sourceFile).
@@ -83,6 +90,13 @@ func (s *ingestionService) IngestText(ctx context.Context, text string, metadata
 
 		// Prepend metadata header to chunk content
 		enrichedContent := metaHeaderStr + chunk.Content
+		
+		if i == 0 {
+			s.logger.Info().
+				Str("source", sourceFile).
+				Int("enriched_content_len", len(enrichedContent)).
+				Msg("[AUDIT] ingestionService chunk 0 enriched content length")
+		}
 
 		err := retryWithBackoff(ctx, 3, func() error {
 			return s.vectorRepo.UpsertDocument(ctx, id, enrichedContent, chunkMeta)

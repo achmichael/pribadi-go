@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/achmichael/pribadi-go/internal/budget"
+
 	"github.com/achmichael/pribadi-go/internal/classifier"
 	contextpkg "github.com/achmichael/pribadi-go/internal/context"
 	"github.com/achmichael/pribadi-go/internal/conversation"
@@ -77,7 +79,7 @@ type DocMeta struct {
 	Advisor         string `json:"advisor"`
 }
 
-const maxContextChars = 2000
+const maxContextChars = 15000 // Increased from 2000 to allow larger contexts when budget permits
 const maxToolIterations = 3
 
 func NewOrchestrator(
@@ -723,6 +725,11 @@ func (o *orchestrator) executeToolCall(ctx context.Context, tc ollama.ToolCall, 
 }
 
 func (o *orchestrator) handleDocumentUpload(ctx context.Context, msg whatsapp.IncomingMessage, userID, sessionID, text string, _ []byte, handleStart time.Time) error {
+	if strings.TrimSpace(text) == "" {
+		ackSendErr := o.waClient.SendText(ctx, msg.SenderJID, "❌ Gagal membaca isi dokumen. Pastikan file bukan gambar yang tidak bisa terbaca teksnya.")
+		return ackSendErr
+	}
+
 	ackSendErr := o.waClient.SendText(ctx, msg.SenderJID, "Sedang membaca dan memproses dokumen, tunggu sebentar ya ⏳")
 	if ackSendErr != nil {
 		o.logger.Warn().Err(ackSendErr).Msg("[orchestrator] failed to send initial document ack")
@@ -730,6 +737,12 @@ func (o *orchestrator) handleDocumentUpload(ctx context.Context, msg whatsapp.In
 
 	metaStart := time.Now()
 	metadata := map[string]string{"source_file": msg.ID}
+
+	fileName := "unknown"
+	if docMsg := msg.RawMessage.GetDocumentMessage(); docMsg != nil && docMsg.GetFileName() != "" {
+		fileName = docMsg.GetFileName()
+	}
+	metadata["filename"] = fileName
 
 	extractText := text
 	if len(extractText) > 2000 {
@@ -820,19 +833,39 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 	docID := uuid.New().String()
 	metadata["document_id"] = docID
 	metadata["user_id"] = userID
+	metadata["session_id"] = sessionID
+	metadata["uploaded_at"] = time.Now().UTC().Format(time.RFC3339)
 
-	ingStart := time.Now()
-	count, _ := o.ragIngest.IngestText(ctx, text, metadata)
-	o.logger.Info().
-		Str("msg_id", msg.ID).
-		Int("chunks_stored", count).
-		Int("text_len", len(text)).
-		Dur("duration_ms", time.Since(ingStart)).
-		Msg("[orchestrator] RAG ingestion done")
-
-	fileName := "unknown"
-	if docMsg := msg.RawMessage.GetDocumentMessage(); docMsg != nil && docMsg.GetFileName() != "" {
-		fileName = docMsg.GetFileName()
+	fileTokens := budget.EstimateTokens(text)
+	calc := budget.NewCalculator(o.ollama.NumCtx(), o.ollama.NumPredict())
+	var count int
+	
+	if calc.FitsInContext(fileTokens, "", nil) {
+		o.logger.Info().
+			Str("msg_id", msg.ID).
+			Int("file_tokens", fileTokens).
+			Msg("[routing] file fits in context budget, skipping immediate Qdrant ingestion (will be full-injected on query)")
+		
+		// Save full text in SQLite so we can inject it later
+		// Since we skip RAG ingestion for small files, we store the text in metadata_json
+		var metaDataObj map[string]interface{}
+		json.Unmarshal([]byte(metaJSON), &metaDataObj)
+		if metaDataObj == nil {
+			metaDataObj = make(map[string]interface{})
+		}
+		metaDataObj["full_text"] = text
+		metaDataBytes, _ := json.Marshal(metaDataObj)
+		metaJSON = string(metaDataBytes)
+		count = 1
+	} else {
+		ingStart := time.Now()
+		count, _ = o.ragIngest.IngestText(ctx, text, metadata)
+		o.logger.Info().
+			Str("msg_id", msg.ID).
+			Int("chunks_stored", count).
+			Int("text_len", len(text)).
+			Dur("duration_ms", time.Since(ingStart)).
+			Msg("[orchestrator] RAG ingestion done")
 	}
 
 	errDoc := o.repo.InsertUserDocument(ctx, repository.InsertUserDocumentParams{

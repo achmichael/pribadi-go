@@ -15,6 +15,8 @@ type Config struct {
 	QdrantAddr       string `envconfig:"QDRANT_ADDR" default:"localhost:6334"`
 	OllamaBaseURL    string `envconfig:"OLLAMA_BASE_URL" required:"true"`
 	OllamaModel      string `envconfig:"OLLAMA_MODEL" required:"true"`
+	OllamaNumCtx     int    `envconfig:"OLLAMA_NUM_CTX" default:"4096"`
+	OllamaNumPredict int    `envconfig:"OLLAMA_NUM_PREDICT" default:"800"`
 	WhisperModelPath string `envconfig:"WHISPER_MODEL_PATH" required:"true"`
 	WhisperBinPath   string `envconfig:"WHISPER_BIN_PATH" required:"true"`
 	LocalDiskPath    string `envconfig:"LOCAL_DISK_PATH" required:"true"`

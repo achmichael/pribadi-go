@@ -73,7 +73,7 @@ func main() {
 
 	fileRepo, _ := repository.NewFileRepository(cfg.LocalDiskPath)
 	toolRegistry := tools.NewRegistry()
-	ollamaClient := ollama.NewClient(cfg.OllamaBaseURL, cfg.OllamaModel, log.Logger, toolRegistry)
+	ollamaClient := ollama.NewClient(cfg.OllamaBaseURL, cfg.OllamaModel, cfg.OllamaNumCtx, cfg.OllamaNumPredict, log.Logger, toolRegistry)
 
 	memory, err := factmemory.NewMemoryManager(sqlite, ollamaClient, cfg.QdrantAddr, cfg.OllamaBaseURL, log.Logger)
 

@@ -94,6 +94,8 @@ type embeddingResponse struct {
 type OllamaClient struct {
 	baseURL      string
 	model        string
+	numCtx       int
+	numPredict   int
 	httpClient   *http.Client
 	logger       *zerolog.Logger
 	toolRegistry ToolRegistry
@@ -113,17 +115,25 @@ func defaultSimplyChatOptions() SimplyChatOptions {
 	}
 }
 
-func NewClient(baseURL, model string, logger *zerolog.Logger, registry ToolRegistry) *OllamaClient {
+func NewClient(baseURL, model string, numCtx, numPredict int, logger *zerolog.Logger, registry ToolRegistry) *OllamaClient {
+	if numCtx <= 0 {
+		numCtx = 4096
+	}
+	if numPredict <= 0 {
+		numPredict = 800
+	}
 	return &OllamaClient{
 		baseURL:      baseURL,
 		model:        model,
+		numCtx:       numCtx,
+		numPredict:   numPredict,
 		httpClient:   &http.Client{Timeout: 5 * time.Minute},
 		logger:       logger,
 		toolRegistry: registry,
 	}
 }
 
-const MaxPromptTokens = 8192
+
 
 func estimateTokens(messages []ChatMessage) int {
 	total := 0
@@ -265,9 +275,9 @@ func (c *OllamaClient) doChatFull(ctx context.Context, messages []ChatMessage, f
 		Format:   format,
 		Tools:    tools,
 		Options: map[string]any{
-			"num_predict": 800,
+			"num_predict": c.numPredict,
 			"temperature": 0.7,
-			"num_ctx":     4096,
+			"num_ctx":     c.numCtx,
 			"num_gpu": 99,
 		},
 		KeepAlive: "5m",
@@ -368,9 +378,9 @@ func (c *OllamaClient) ChatStreamWithThink(ctx context.Context, messages []ChatM
 		Tools:    tools,
 		Think:  think,
 		Options: map[string]any{
-			"num_predict": 800,
+			"num_predict": c.numPredict,
 			"temperature": 0.7,
-			"num_ctx":     4096,
+			"num_ctx":     c.numCtx,
 			"num_gpu": 99,
 		},
 		KeepAlive: "5m",
@@ -441,6 +451,9 @@ func (c *OllamaClient) Schemas() []Tool {
 	}
 	return nil
 }
+
+func (c *OllamaClient) NumCtx() int     { return c.numCtx }
+func (c *OllamaClient) NumPredict() int  { return c.numPredict }
 
 func (c *OllamaClient) GenerateEmbedding(ctx context.Context, text string) ([]float32, error) {
 	start := time.Now()

@@ -121,7 +121,20 @@ func (b *builder) Build(ctx context.Context, params BuildParams) (*prompt.Sessio
 	} else {
 		go func() {
 			retStart := time.Now()
-			ctxInfo, err := b.ragRetrieve.Retrieve(ctx, params.RAGQuery, params.TargetDocID)
+			
+			var ctxInfo rag.PromptContext
+			var err error
+			
+			if params.TargetDocID != "" {
+				ctxInfo, err = b.ragRetrieve.RetrieveFiltered(ctx, params.RAGQuery, map[string]string{
+					"document_id": params.TargetDocID,
+				})
+			} else {
+				ctxInfo, err = b.ragRetrieve.RetrieveFiltered(ctx, params.RAGQuery, map[string]string{
+					"session_id": params.SessionID,
+				})
+			}
+			
 			b.logger.Info().
 				Bool("has_results", ctxInfo.HasResults).
 				Int("context_len", len(ctxInfo.Context)).
@@ -165,8 +178,9 @@ func (b *builder) Build(ctx context.Context, params BuildParams) (*prompt.Sessio
 
 	// 5. Build document metadata block if targeting a document
 	metadataBlock := ""
+	fullFileText := ""
 	if params.TargetDocID != "" {
-		metadataBlock = b.buildMetadataBlock(ctx, params.TargetDocID)
+		metadataBlock, fullFileText = b.buildMetadataBlock(ctx, params.TargetDocID)
 	}
 
 	// 6. Build preferences block
@@ -176,6 +190,14 @@ func (b *builder) Build(ctx context.Context, params BuildParams) (*prompt.Sessio
 	turnCount := 0
 	if raw, err := b.stateManager.GetRaw(ctx, params.UserID, params.SessionID); err == nil && raw != nil {
 		turnCount = raw.TurnCount
+	}
+	
+	// If we have full file text, we want to bypass RAG Context and just use it
+	if fullFileText != "" {
+		ctxInfo.Context = fmt.Sprintf("[FILE UPLOAD — Isi lengkap file yang baru diupload user]\n\n---\n%s\n---", fullFileText)
+		ctxInfo.HasResults = true
+		ctxInfo.Sources = []string{"Dokumen Aktif (Full)"}
+		b.logger.Info().Msg("[routing] Context builder injected full file text directly, overriding RAG")
 	}
 
 	sc := &prompt.SessionContext{
@@ -237,13 +259,28 @@ func (b *builder) loadPromptTemplate(ctx context.Context) string {
 	return template
 }
 
-func (b *builder) buildMetadataBlock(ctx context.Context, docID string) string {
+func (b *builder) buildMetadataBlock(ctx context.Context, docID string) (string, string) {
 	doc, err := b.repo.GetUserDocumentByID(ctx, docID)
 	if err != nil || doc == nil {
-		return ""
+		return "", ""
 	}
 
 	metadataJSON := doc.MetadataJSON
+	fullText := ""
+	
+	if metadataJSON != "" && metadataJSON != "{}" {
+		var metaDataObj map[string]interface{}
+		if err := json.Unmarshal([]byte(metadataJSON), &metaDataObj); err == nil {
+			if ft, ok := metaDataObj["full_text"].(string); ok {
+				fullText = ft
+				// Remove full_text from metadata so it doesn't pollute the prompt header
+				delete(metaDataObj, "full_text")
+				bBytes, _ := json.Marshal(metaDataObj)
+				metadataJSON = string(bBytes)
+			}
+		}
+	}
+	
 	if metadataJSON == "" || metadataJSON == "{}" {
 		basicMeta := map[string]string{
 			"title":  doc.Title,
@@ -257,7 +294,7 @@ func (b *builder) buildMetadataBlock(ctx context.Context, docID string) string {
 	sb.WriteString(fmt.Sprintf("--- DOCUMENT METADATA (AKTIF: document_id=%s) ---\n", doc.ID))
 	sb.WriteString(metadataJSON)
 	sb.WriteString("\n--- END METADATA ---\n")
-	return sb.String()
+	return sb.String(), fullText
 }
 
 func (b *builder) buildPreferencesBlock(ctx context.Context, userID string) string {

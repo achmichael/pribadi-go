@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/achmichael/pribadi-go/internal/budget"
 	"github.com/achmichael/pribadi-go/internal/domain"
 	"github.com/achmichael/pribadi-go/internal/repository"
 	"github.com/achmichael/pribadi-go/internal/usecase/rag"
@@ -80,6 +81,13 @@ func NewWebChatService(
 	}
 }
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func (s *webChatService) GenerateChatTitle(ctx context.Context, message string) (string, error) {
 	response, err := s.ollamaClient.GenerateChatTitle(ctx, message)
 
@@ -89,6 +97,7 @@ func (s *webChatService) GenerateChatTitle(ctx context.Context, message string) 
 
 	return strings.TrimSpace(response), nil
 }
+
 // ─── Sessions ─────────────────────────────────────────────────────────────
 
 func (s *webChatService) CreateSession(ctx context.Context, userID, title string) (*domain.WebChatSession, error) {
@@ -186,61 +195,124 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 	go func() {
 		defer close(interceptedStream)
 
+		s.logger.Info().
+			Str("fileJobID", fileJobID).
+			Str("message", message).
+			Msg("[AUDIT] WebChatService StreamChat started processing")
+
+		fileFullInjected := false
+		targetDocID := ""
+
 		if fileJobID != "" {
+			job, _ := s.repo.GetUploadJob(ctx, fileJobID)
+			if job != nil {
+				targetDocID = job.DocumentID
+			}
+
 			interceptedStream <- ollama.StreamChunk{
 				Stage: &ollama.StageEvent{Stage: "extracting_file", Message: "Processing attached file..."},
 			}
 
 			fileContent := s.waitAndExtractFile(ctx, fileJobID)
 
+			s.logger.Info().
+				Str("fileJobID", fileJobID).
+				Int("fileContentLength", len(fileContent)).
+				Msg("[AUDIT] WebChatService extracted file content length")
+
 			if ctx.Err() != nil {
 				return
 			}
 
-			if fileContent != "" {
-				lastIdx := len(oMessages) - 1
-				userText := oMessages[lastIdx].Content
+			if strings.TrimSpace(fileContent) == "" {
+				interceptedStream <- ollama.StreamChunk{
+					Stage: &ollama.StageEvent{Stage: "file_extracted", Message: "File extraction returned empty content. The file may be unreadable."},
+				}
+			} else {
+				fileTokens := budget.EstimateTokens(fileContent)
 
-				if strings.TrimSpace(userText) == "" {
-					oMessages[lastIdx].Content = fmt.Sprintf("The user uploaded a file. Here is the extracted content:\n\n---\n%s\n---\n\nPlease analyze and summarize this document.", fileContent)
+				var historyTexts []string
+				for _, m := range oMessages {
+					historyTexts = append(historyTexts, m.Content)
+				}
+				calc := budget.NewCalculator(s.ollamaClient.NumCtx(), s.ollamaClient.NumPredict())
+
+				if calc.FitsInContext(fileTokens, oMessages[0].Content, historyTexts[1:]) {
+					s.logger.Info().
+						Int("file_tokens", fileTokens).
+						Msg("[routing] full-inject path: file fits in context budget")
+
+					lastIdx := len(oMessages) - 1
+					userText := oMessages[lastIdx].Content
+
+					if strings.TrimSpace(userText) == "" {
+						oMessages[lastIdx].Content = fmt.Sprintf("[FILE UPLOAD — Isi lengkap file yang baru diupload user]\n\n---\n%s\n---\n\nAnalisis dan rangkum isi dokumen di atas.", fileContent)
+					} else {
+						oMessages[lastIdx].Content = fmt.Sprintf("[FILE UPLOAD — Isi lengkap file yang baru diupload user]\n\nInstruksi user: %s\n\n---\n%s\n---\n\nIkuti instruksi user di atas. Konten file disediakan sebagai konteks.", userText, fileContent)
+					}
+
+					fileFullInjected = true
+					interceptedStream <- ollama.StreamChunk{
+						Stage: &ollama.StageEvent{Stage: "file_extracted", Message: "File content injected directly (fits in context)"},
+					}
 				} else {
-					oMessages[lastIdx].Content = fmt.Sprintf("User instruction: %s\n\nAttached file content:\n\n---\n%s\n---\n\nFollow the user's instruction above. The file content is provided as supporting context.", userText, fileContent)
+					s.logger.Info().
+						Int("file_tokens", fileTokens).
+						Msg("[routing] RAG path: file too large for context, using chunked retrieval")
+
+					interceptedStream <- ollama.StreamChunk{
+						Stage: &ollama.StageEvent{Stage: "file_extracted", Message: "File too large for direct injection, using document search"},
+					}
+				}
+			}
+		}
+
+		if !fileFullInjected {
+			interceptedStream <- ollama.StreamChunk{
+				Stage: &ollama.StageEvent{Stage: "retrieving_context", Tool: "qdrant_search", Message: "Searching documents..."},
+			}
+
+			var pCtx rag.PromptContext
+			var ragErr error
+
+			if targetDocID != "" {
+				pCtx, ragErr = s.ragRetrieve.RetrieveFiltered(ctx, message, map[string]string{
+					"document_id": targetDocID,
+				})
+				s.logger.Info().
+					Str("targetDocID", targetDocID).
+					Bool("has_results", pCtx.HasResults).
+					Msg("[routing] RAG filtered search by document_id")
+			} else {
+				// Enforce session_id filter for general queries in the session
+				pCtx, ragErr = s.ragRetrieve.RetrieveFiltered(ctx, message, map[string]string{
+					"session_id": sessionID,
+				})
+				s.logger.Info().
+					Str("session_id", sessionID).
+					Bool("has_results", pCtx.HasResults).
+					Msg("[routing] RAG filtered search by session_id")
+			}
+
+			if ctx.Err() != nil {
+				return
+			}
+
+			if ragErr == nil && pCtx.HasResults {
+				lastIdx := len(oMessages) - 1
+				if targetDocID != "" {
+					oMessages[lastIdx].Content = fmt.Sprintf("%s\n\n[FILE UPLOAD — Potongan relevan dari file yang baru diupload user]\n%s", oMessages[lastIdx].Content, pCtx.Context)
+				} else {
+					oMessages[lastIdx].Content = fmt.Sprintf("%s\n\nContext from user documents:\n%s", oMessages[lastIdx].Content, pCtx.Context)
 				}
 
 				interceptedStream <- ollama.StreamChunk{
-					Stage: &ollama.StageEvent{Stage: "file_extracted", Message: "File content ready"},
+					Stage: &ollama.StageEvent{Stage: "context_retrieved", Tool: "qdrant_search", Message: fmt.Sprintf("Found %d relevant chunks", len(strings.Split(pCtx.Context, "\n\n")))},
 				}
-			}
-		}
-
-		interceptedStream <- ollama.StreamChunk{
-			Stage: &ollama.StageEvent{Stage: "retrieving_context", Tool: "qdrant_search", Message: "Searching documents..."},
-		}
-
-		targetDocID := ""
-		if fileJobID != "" {
-			job, _ := s.repo.GetUploadJob(ctx, fileJobID)
-			if job != nil && job.DocumentID != "" {
-				targetDocID = job.DocumentID
-			}
-		}
-
-		pCtx, ragErr := s.ragRetrieve.Retrieve(ctx, message, targetDocID)
-
-		if ctx.Err() != nil {
-			return
-		}
-
-		if ragErr == nil && pCtx.HasResults {
-			lastIdx := len(oMessages) - 1
-			oMessages[lastIdx].Content = fmt.Sprintf("%s\n\nContext from user documents:\n%s", oMessages[lastIdx].Content, pCtx.Context)
-
-			interceptedStream <- ollama.StreamChunk{
-				Stage: &ollama.StageEvent{Stage: "context_retrieved", Tool: "qdrant_search", Message: fmt.Sprintf("Found %d relevant chunks", len(strings.Split(pCtx.Context, "\n\n")))},
-			}
-		} else {
-			interceptedStream <- ollama.StreamChunk{
-				Stage: &ollama.StageEvent{Stage: "context_retrieved", Message: "No relevant documents found"},
+			} else {
+				interceptedStream <- ollama.StreamChunk{
+					Stage: &ollama.StageEvent{Stage: "context_retrieved", Message: "No relevant documents found"},
+				}
 			}
 		}
 
@@ -325,10 +397,6 @@ func (s *webChatService) waitAndExtractFile(ctx context.Context, jobID string) s
 			if err != nil {
 				s.logger.Warn().Err(err).Str("job_id", jobID).Msg("Failed to extract text for inline use")
 				return ""
-			}
-			const maxLen = 8000
-			if len(text) > maxLen {
-				text = text[:maxLen] + "\n\n[... content truncated ...]"
 			}
 			return text
 		}
@@ -429,15 +497,29 @@ func (s *webChatService) ProcessUploadJobAsync(jobID string) {
 			return
 		}
 
+		s.logger.Info().
+			Str("job_id", jobID).
+			Int("textLength", len(text)).
+			Msg("[AUDIT] WebChatService extracted raw text from file")
+
 		docID := uuid.New().String() // Generating docID here since IngestText returns chunk count
-		
+
+		s.logger.Info().
+			Str("job_id", jobID).
+			Str("file_name", job.FileName).
+			Str("document_id", docID).
+			Str("user_id", job.UserID).
+			Msg("[AUDIT] WebChatService ProcessUploadJobAsync preparing to ingest text")
+			
 		// 3. Ingest Document
 		chunks, err := s.ragIngest.IngestText(ctx, text, map[string]string{
-			"source": "web_dashboard",
+			"source":      "web_dashboard",
 			"source_file": job.FileName,
-			"mime_type": job.MimeType,
-			"user_id": job.UserID,
+			"mime_type":   job.MimeType,
+			"user_id":     job.UserID,
 			"document_id": docID,
+			"filename":    job.FileName,
+			"uploaded_at": time.Now().UTC().Format(time.RFC3339),
 		})
 
 		// 4. Mark completed/failed
@@ -447,7 +529,7 @@ func (s *webChatService) ProcessUploadJobAsync(jobID string) {
 			return
 		}
 
-		s.logger.Info().Str("job_id", jobID).Int("chunks", chunks).Msg("RAG ingestion completed")
+		s.logger.Info().Str("job_id", jobID).Int("chunks", chunks).Str("document_id", docID).Msg("[AUDIT] WebChatService RAG ingestion completed successfully")
 		_ = s.repo.UpdateUploadJobStatus(ctx, jobID, "completed", "", docID)
 	}()
 }

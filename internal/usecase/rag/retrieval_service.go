@@ -19,7 +19,7 @@ type PromptContext struct {
 // RetrievalService handles semantic search
 type RetrievalService interface {
 	Retrieve(ctx context.Context, question string, targetDocID string) (PromptContext, error)
-	// delete chunks documents in qdrant
+	RetrieveFiltered(ctx context.Context, question string, filters map[string]string) (PromptContext, error)
 	PurgeRAGDocuments(ctx context.Context, userID string) error
 }
 
@@ -100,4 +100,52 @@ func (s *retrievalService) Retrieve(ctx context.Context, question string, target
 
 func (s *retrievalService) PurgeRAGDocuments(ctx context.Context, userID string) error {
 	return s.vectorRepo.PurgeRAGDocuments(ctx, userID)
+}
+
+func (s *retrievalService) RetrieveFiltered(ctx context.Context, question string, filters map[string]string) (PromptContext, error) {
+	start := time.Now()
+
+	s.logger.Info().
+		Int("query_len", len(question)).
+		Int("filter_count", len(filters)).
+		Msg("[retrieval] starting filtered search")
+
+	results, err := s.vectorRepo.SearchWithFilters(ctx, question, 4, filters)
+	if err != nil {
+		return PromptContext{}, err
+	}
+
+	if len(results) == 0 {
+		s.logger.Info().Dur("ms", time.Since(start)).Msg("[retrieval] filtered search: no results")
+		return PromptContext{HasResults: false}, nil
+	}
+
+	var sb strings.Builder
+	var sources []string
+	const minScore float32 = 0.3
+	for i, res := range results {
+		if res.Score < minScore {
+			continue
+		}
+		if i > 0 {
+			sb.WriteString("\n---\n")
+		}
+		sb.WriteString(res.Content)
+		source := res.Metadata["source_file"]
+		if source != "" {
+			sources = append(sources, source)
+		}
+	}
+
+	s.logger.Info().
+		Int("results_count", len(results)).
+		Float32("top_score", results[0].Score).
+		Dur("ms", time.Since(start)).
+		Msg("[retrieval] filtered search done")
+
+	return PromptContext{
+		Context:    sb.String(),
+		Sources:    sources,
+		HasResults: true,
+	}, nil
 }

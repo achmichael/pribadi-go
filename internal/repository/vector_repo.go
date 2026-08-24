@@ -26,6 +26,7 @@ type SearchResult struct {
 type VectorRepository interface {
 	UpsertDocument(ctx context.Context, id string, content string, metadata map[string]string) error
 	Search(ctx context.Context, query string, topK int, filterDocID string) ([]SearchResult, error)
+	SearchWithFilters(ctx context.Context, query string, topK int, filters map[string]string) ([]SearchResult, error)
 	PurgeRAGDocuments(ctx context.Context, userID string) error
 	Close() error
 }
@@ -171,6 +172,13 @@ func (r *qdrantVectorRepo) UpsertDocument(ctx context.Context, id string, conten
 	for k, v := range metadata {
 		payload[k] = &pb.Value{Kind: &pb.Value_StringValue{StringValue: v}}
 	}
+	
+	if metadata["chunk_index"] == "0" {
+		r.logger.Info().
+			Str("doc_id", id).
+			Int("payload_metadata_count", len(payload)).
+			Msg("[AUDIT] vector_repo UpsertDocument checking payload for chunk 0")
+	}
 
 	// Derive deterministic UUID from string ID
 	pointUUID := deterministicUUID(id)
@@ -255,6 +263,12 @@ func (r *qdrantVectorRepo) Search(ctx context.Context, query string, topK int, f
 		}
 	}
 
+	r.logger.Info().
+		Int("query_len", len(query)).
+		Int("top_k", topK).
+		Str("filterDocID", filterDocID).
+		Msg("[AUDIT] vector_repo Search executing with filterDocID")
+
 	searchStart := time.Now()
 	limit := uint64(topK)
 	withPayload := true
@@ -311,6 +325,98 @@ func (r *qdrantVectorRepo) Search(ctx context.Context, query string, topK int, f
 		Dur("search_ms", searchDur).
 		Dur("total_ms", time.Since(start)).
 		Msg("[vector_repo] search done")
+		
+	if len(results) > 0 {
+		r.logger.Info().
+			Str("top_result_id", results[0].ID).
+			Float32("top_result_score", results[0].Score).
+			Msg("[AUDIT] vector_repo Search top result")
+	}
+
+	return results, nil
+}
+
+func (r *qdrantVectorRepo) SearchWithFilters(ctx context.Context, query string, topK int, filters map[string]string) ([]SearchResult, error) {
+	start := time.Now()
+
+	embedStart := time.Now()
+	queryEmbedding, err := r.embedder.Embed(ctx, query)
+	embedDur := time.Since(embedStart)
+	if err != nil {
+		return nil, fmt.Errorf("generate query embedding: %w", err)
+	}
+
+	var conditions []*pb.Condition
+	for k, v := range filters {
+		if v == "" {
+			continue
+		}
+		conditions = append(conditions, &pb.Condition{
+			ConditionOneOf: &pb.Condition_Field{
+				Field: &pb.FieldCondition{
+					Key:   k,
+					Match: &pb.Match{MatchValue: &pb.Match_Keyword{Keyword: v}},
+				},
+			},
+		})
+	}
+
+	var filter *pb.Filter
+	if len(conditions) > 0 {
+		filter = &pb.Filter{Must: conditions}
+	}
+
+	r.logger.Info().
+		Int("query_len", len(query)).
+		Int("top_k", topK).
+		Int("filter_count", len(conditions)).
+		Msg("[vector_repo] SearchWithFilters executing")
+
+	searchStart := time.Now()
+	limit := uint64(topK)
+	withPayload := true
+	resp, err := r.points.Search(ctx, &pb.SearchPoints{
+		CollectionName: r.collName,
+		Vector:         queryEmbedding,
+		Limit:          limit,
+		Filter:         filter,
+		WithPayload:    &pb.WithPayloadSelector{SelectorOptions: &pb.WithPayloadSelector_Enable{Enable: withPayload}},
+	})
+	searchDur := time.Since(searchStart)
+	if err != nil {
+		return nil, fmt.Errorf("search points: %w", err)
+	}
+
+	results := make([]SearchResult, 0, len(resp.GetResult()))
+	for _, scored := range resp.GetResult() {
+		sr := SearchResult{
+			Score:    scored.GetScore(),
+			Metadata: make(map[string]string),
+		}
+		for k, v := range scored.GetPayload() {
+			switch k {
+			case "content":
+				sr.Content = v.GetStringValue()
+			case "original_id":
+				sr.ID = v.GetStringValue()
+			default:
+				sr.Metadata[k] = v.GetStringValue()
+			}
+		}
+		if sr.ID == "" {
+			if uid := scored.GetId().GetUuid(); uid != "" {
+				sr.ID = uid
+			}
+		}
+		results = append(results, sr)
+	}
+
+	r.logger.Info().
+		Int("results", len(results)).
+		Dur("embed_ms", embedDur).
+		Dur("search_ms", searchDur).
+		Dur("total_ms", time.Since(start)).
+		Msg("[vector_repo] SearchWithFilters done")
 
 	return results, nil
 }

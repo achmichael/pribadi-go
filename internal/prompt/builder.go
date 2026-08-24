@@ -10,9 +10,6 @@ import (
 	"github.com/achmichael/pribadi-go/internal/domain"
 )
 
-// maxContextChars caps RAG context injected into prompt.
-const maxContextChars = 2000
-
 // Persona holds agent identity fetched from dashboard config.
 type Persona struct {
 	Name            string
@@ -177,10 +174,12 @@ func (b *Builder) resolveTone(sc SessionContext) string {
 	return "casual"
 }
 
-// truncateRAG caps RAG context to maxContextChars.
+// truncateRAG limits RAG context if it gets absurdly long, but we rely on token budget now.
+// It's raised to 50000 chars to avoid truncating full-inject texts.
 func (b *Builder) truncateRAG(ragCtx string) string {
-	if len(ragCtx) > maxContextChars {
-		return ragCtx[:maxContextChars] + "\n[...context truncated...]"
+	const maxChars = 50000
+	if len(ragCtx) > maxChars {
+		return ragCtx[:maxChars] + "\n[...context truncated...]"
 	}
 	return ragCtx
 }
