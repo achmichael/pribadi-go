@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, memo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Send, Square, Sparkles, Terminal, FileText, Database, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,8 +37,68 @@ async function uploadFile(file: File, signal?: AbortSignal): Promise<string | nu
   return job.id || null;
 }
 
-export function ChatArea() {
+const ChatInput = memo(({ 
+  onSubmit, 
+  onStop, 
+  isStreaming, 
+  attachedFile, 
+  setAttachedFile 
+}: { 
+  onSubmit: (text: string) => void; 
+  onStop: () => void; 
+  isStreaming: boolean;
+  attachedFile: AttachedFile | null;
+  setAttachedFile: (file: AttachedFile | null) => void;
+}) => {
   const [input, setInput] = useState("");
+  const canSubmit = input.trim() || attachedFile;
+
+  return (
+    <div className="relative flex flex-col glow-effect rounded-2xl bg-zinc-900/50 backdrop-blur-md border border-white/10 transition-all">
+      <Textarea
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            onSubmit(input);
+            setInput("");
+          }
+        }}
+        placeholder="Ask anything..."
+        className="min-h-[56px] max-h-[200px] border-0 focus-visible:ring-0 resize-none bg-transparent py-4 px-4 text-base placeholder:text-zinc-500"
+        rows={1}
+      />
+      <div className="flex items-center justify-between p-2">
+        <FileUpload
+          attachedFile={attachedFile}
+          onFileSelect={setAttachedFile}
+          disabled={isStreaming}
+        />
+        {isStreaming ? (
+          <Button
+            onClick={onStop}
+            size="icon"
+            className="rounded-xl h-9 w-9 bg-red-500/80 text-white hover:bg-red-500 transition-all duration-300"
+          >
+            <Square className="h-3.5 w-3.5 fill-current" />
+          </Button>
+        ) : (
+          <Button
+            onClick={() => { onSubmit(input); setInput(""); }}
+            disabled={!canSubmit}
+            size="icon"
+            className={`rounded-xl h-9 w-9 transition-all duration-300 ${canSubmit ? "bg-white text-black hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"}`}
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+});
+
+export function ChatArea() {
   const [model, setModel] = useState("local");
   const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -135,11 +195,10 @@ export function ChatArea() {
   };
 
   const handleSubmit = async (textToSubmit?: string) => {
-    const text = textToSubmit || input;
+    const text = textToSubmit || "";
     const hasFile = !!attachedFile;
     if ((!text.trim() && !hasFile) || isStreaming) return;
 
-    setInput("");
     const pendingFile = attachedFile;
     setAttachedFile(null);
 
@@ -498,46 +557,13 @@ export function ChatArea() {
 
       <div className="absolute bottom-0 w-full z-20 bg-gradient-to-t from-background via-background to-transparent pt-10 pb-6 px-4 md:px-8">
         <div className="max-w-3xl mx-auto">
-          <div className="relative flex flex-col glow-effect rounded-2xl bg-zinc-900/50 backdrop-blur-md border border-white/10 transition-all">
-            <Textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSubmit();
-                }
-              }}
-              placeholder="Ask anything..."
-              className="min-h-[56px] max-h-[200px] border-0 focus-visible:ring-0 resize-none bg-transparent py-4 px-4 text-base placeholder:text-zinc-500"
-              rows={1}
-            />
-            <div className="flex items-center justify-between p-2">
-              <FileUpload
-                attachedFile={attachedFile}
-                onFileSelect={setAttachedFile}
-                disabled={isStreaming}
-              />
-              {isStreaming ? (
-                <Button
-                  onClick={handleStop}
-                  size="icon"
-                  className="rounded-xl h-9 w-9 bg-red-500/80 text-white hover:bg-red-500 transition-all duration-300"
-                >
-                  <Square className="h-3.5 w-3.5 fill-current" />
-                </Button>
-              ) : (
-                <Button
-                  onClick={() => handleSubmit()}
-                  disabled={!canSubmit}
-                  size="icon"
-                  className={`rounded-xl h-9 w-9 transition-all duration-300 ${canSubmit ? "bg-white text-black hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"}`}
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          </div>
+          <ChatInput 
+            onSubmit={handleSubmit}
+            onStop={handleStop}
+            isStreaming={isStreaming}
+            attachedFile={attachedFile}
+            setAttachedFile={setAttachedFile}
+          />
           <p className="text-[11px] text-center text-zinc-600 mt-3 font-medium">
             AI can make mistakes. Everything runs locally by default.
           </p>
