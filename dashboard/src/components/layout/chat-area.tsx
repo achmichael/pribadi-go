@@ -27,7 +27,9 @@ async function uploadFile(file: File, signal?: AbortSignal): Promise<string | nu
 
   const res = await fetch(`${API_BASE}/chat/upload`, {
     method: "POST",
-    headers: { ...getAuthHeader() },
+    headers: {
+      ...getAuthHeader()
+    },
     body: formData,
     signal,
   });
@@ -37,7 +39,7 @@ async function uploadFile(file: File, signal?: AbortSignal): Promise<string | nu
   return job.id || null;
 }
 
-const ChatInput = memo(({ 
+const ChatInput = memo(function ChatInput({ 
   onSubmit, 
   onStop, 
   isStreaming, 
@@ -49,7 +51,7 @@ const ChatInput = memo(({
   isStreaming: boolean;
   attachedFile: AttachedFile | null;
   setAttachedFile: (file: AttachedFile | null) => void;
-}) => {
+}) {
   const [input, setInput] = useState("");
   const canSubmit = input.trim() || attachedFile;
 
