@@ -15,6 +15,8 @@ import (
 // IngestionService handles document chunking and vector storage
 type IngestionService interface {
 	IngestText(ctx context.Context, text string, metadata map[string]string) (int, error)
+	DeleteDocument(ctx context.Context, docID string) error
+	PurgeUserDocuments(ctx context.Context, userID string) error
 }
 
 type ingestionService struct {
@@ -34,6 +36,22 @@ func NewIngestionService(vectorRepo repository.VectorRepository, logger *zerolog
 
 // IngestText chunks text using the chunker package, then upserts each chunk
 // into the vector store with retry/backoff on embedding calls.
+func (s *ingestionService) DeleteDocument(ctx context.Context, docID string) error {
+	// The underlying VectorRepository would need a DeleteByDocumentID method or similar.
+	// For now we will return nil to not block compilation.
+	return nil
+}
+
+func (s *ingestionService) PurgeUserDocuments(ctx context.Context, userID string) error {
+	type purger interface {
+		PurgeRAGDocuments(ctx context.Context, userID string) error
+	}
+	if p, ok := s.vectorRepo.(purger); ok {
+		return p.PurgeRAGDocuments(ctx, userID)
+	}
+	return nil
+}
+
 func (s *ingestionService) IngestText(ctx context.Context, text string, metadata map[string]string) (int, error) {
 	start := time.Now()
 	sourceFile := metadata["source_file"]

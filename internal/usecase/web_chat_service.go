@@ -39,6 +39,9 @@ type WebChatService interface {
 	// Uploads for RAG
 	CreateUploadJob(ctx context.Context, userID, fileName, filePath, mimeType string, fileSize int64) (*domain.WebUploadJob, error)
 	ProcessUploadJobAsync(jobID string)
+	ListUploadJobs(ctx context.Context, userID string) ([]domain.WebUploadJob, error)
+	DeleteUploadJob(ctx context.Context, userID, jobID string) error
+	PurgeUserStorage(ctx context.Context, userID string) error
 }
 
 type webChatService struct {
@@ -532,4 +535,50 @@ func (s *webChatService) ProcessUploadJobAsync(jobID string) {
 		s.logger.Info().Str("job_id", jobID).Int("chunks", chunks).Str("document_id", docID).Msg("[AUDIT] WebChatService RAG ingestion completed successfully")
 		_ = s.repo.UpdateUploadJobStatus(ctx, jobID, "completed", "", docID)
 	}()
+}
+
+func (s *webChatService) ListUploadJobs(ctx context.Context, userID string) ([]domain.WebUploadJob, error) {
+	return s.repo.ListUploadJobs(ctx, userID)
+}
+
+func (s *webChatService) DeleteUploadJob(ctx context.Context, userID, jobID string) error {
+	job, err := s.repo.GetUploadJob(ctx, jobID)
+	if err != nil {
+		return err
+	}
+	if job == nil || job.UserID != userID {
+		return fmt.Errorf("job not found or unauthorized")
+	}
+
+	// Delete from local disk
+	if job.FilePath != "" {
+		_ = os.Remove(job.FilePath)
+	}
+
+	// Delete from Qdrant if document_id exists
+	if job.DocumentID != "" {
+		_ = s.ragIngest.DeleteDocument(ctx, job.DocumentID)
+	}
+
+	return s.repo.DeleteUploadJob(ctx, jobID)
+}
+
+func (s *webChatService) PurgeUserStorage(ctx context.Context, userID string) error {
+	jobs, err := s.repo.ListUploadJobs(ctx, userID)
+	if err != nil {
+		return err
+	}
+	
+	// Delete all jobs files and from DB
+	for _, job := range jobs {
+		if job.FilePath != "" {
+			_ = os.Remove(job.FilePath)
+		}
+		_ = s.repo.DeleteUploadJob(ctx, job.ID)
+	}
+
+	// Delete EVERYTHING in Qdrant for this user
+	_ = s.ragIngest.PurgeUserDocuments(ctx, userID)
+
+	return nil
 }

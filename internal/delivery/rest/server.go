@@ -155,7 +155,11 @@ func NewServer(
 			r.Put("/chat/sessions/{id}", srv.handleUpdateSession)
 			r.Delete("/chat/sessions/{id}", srv.handleDeleteSession)
 			r.Get("/chat/sessions/{id}/history", srv.handleGetSessionHistory)
+			r.Get("/chat/settings", srv.handleGetChatSettings)
 			r.Put("/chat/settings", srv.handleChatSettings)
+			r.Get("/chat/uploads", srv.handleListUploads)
+			r.Delete("/chat/uploads", srv.handlePurgeUploads)
+			r.Delete("/chat/uploads/{id}", srv.handleDeleteUpload)
 
 			// Rate limited non-streaming uploads
 			r.Group(func(r chi.Router) {

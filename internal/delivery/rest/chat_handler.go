@@ -14,7 +14,7 @@ import (
 
 func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 	var log = logger.New("info")
-	
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -25,12 +25,12 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		Model     string `json:"model"`
 		FileJobID string `json:"file_job_id"`
 	}
-	
+
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	
+
 	if req.Model == "" {
 		req.Model = "local"
 	}
@@ -40,7 +40,7 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Streaming unsupported!", http.StatusInternalServerError)
 		return
 	}
-	
+
 	userID := r.Context().Value("user_id").(string)
 	ctx := r.Context()
 

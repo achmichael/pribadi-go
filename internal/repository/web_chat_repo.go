@@ -30,6 +30,8 @@ type WebChatRepository interface {
 	// Upload Jobs
 	CreateUploadJob(ctx context.Context, job domain.WebUploadJob) error
 	GetUploadJob(ctx context.Context, jobID string) (*domain.WebUploadJob, error)
+	ListUploadJobs(ctx context.Context, userID string) ([]domain.WebUploadJob, error)
+	DeleteUploadJob(ctx context.Context, jobID string) error
 	UpdateUploadJobStatus(ctx context.Context, jobID, status, errMsg, docID string) error
 }
 
@@ -208,6 +210,36 @@ func (r *webChatRepo) GetUploadJob(ctx context.Context, jobID string) (*domain.W
 		j.DocumentID = docID.String
 	}
 	return &j, nil
+}
+
+func (r *webChatRepo) ListUploadJobs(ctx context.Context, userID string) ([]domain.WebUploadJob, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id, user_id, file_name, file_path, file_size, mime_type, status, error_message, document_id, created_at, updated_at FROM web_upload_jobs WHERE user_id = ? ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []domain.WebUploadJob
+	for rows.Next() {
+		var j domain.WebUploadJob
+		var errMsg, docID sql.NullString
+		if err := rows.Scan(&j.ID, &j.UserID, &j.FileName, &j.FilePath, &j.FileSize, &j.MimeType, &j.Status, &errMsg, &docID, &j.CreatedAt, &j.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if errMsg.Valid {
+			j.ErrorMessage = errMsg.String
+		}
+		if docID.Valid {
+			j.DocumentID = docID.String
+		}
+		jobs = append(jobs, j)
+	}
+	return jobs, nil
+}
+
+func (r *webChatRepo) DeleteUploadJob(ctx context.Context, jobID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM web_upload_jobs WHERE id = ?`, jobID)
+	return err
 }
 
 func (r *webChatRepo) UpdateUploadJobStatus(ctx context.Context, jobID, status, errMsg, docID string) error {
