@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, memo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Send, Square, Sparkles, Terminal, FileText, Database, Wrench } from "lucide-react";
+import { Send, Square, Sparkles, Terminal, FileText, Database, Wrench, Cpu, CheckCircle2, Network, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useChatStore } from "@/store/chat";
@@ -380,7 +380,7 @@ export function ChatArea() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 md:px-8 mt-16 z-10" ref={scrollRef}>
-        <div className="max-w-3xl mx-auto space-y-8 pb-32">
+        <div className="max-w-4xl mx-auto space-y-8 pb-32">
           {isLoadingHistory ? (
             <div className="flex justify-center items-center h-full mt-32">
               <div className="animate-spin h-6 w-6 border-2 border-zinc-500 border-t-transparent rounded-full" />
@@ -390,37 +390,109 @@ export function ChatArea() {
               {historyError}
             </div>
           ) : messages.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, ease: "easeOut" }}
-              className="flex flex-col items-center justify-center text-center mt-24 md:mt-32"
-            >
-              <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-zinc-800 to-black border border-white/10 flex items-center justify-center shadow-2xl mb-8 relative">
-                <div className="absolute inset-0 bg-blue-500/10 blur-xl rounded-full"></div>
-                <Sparkles className="h-7 w-7 text-white z-10" />
-              </div>
-              <h2 className="text-3xl font-medium text-gradient mb-3">Good evening.</h2>
-              <p className="text-muted-foreground max-w-md text-sm mb-12 leading-relaxed">
-                I am pribadi-go, your local intelligence. I can search documents, execute tools, and
-                maintain persistent memory.
-              </p>
+            <div className="flex flex-col lg:flex-row gap-12 lg:gap-8 mt-12 md:mt-24 max-w-5xl mx-auto w-full">
+              {/* Left Column: Greeting & Actions */}
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
+                className="flex-1 flex flex-col justify-start"
+              >
+                <h2 className="text-4xl font-medium text-gradient mb-2 tracking-tight">Good evening.</h2>
+                <p className="text-muted-foreground text-sm mb-10 leading-relaxed max-w-md">
+                  I am pribadi-go, your local intelligence. Ready to process documents, execute tools, and retrieve from memory.
+                </p>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
-                {SUGGESTED_PROMPTS.map((prompt, i) => (
-                  <motion.button
-                    key={i}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => handleSubmit(prompt.text)}
-                    className="flex items-center gap-3 p-4 rounded-xl border border-white/5 bg-white/[0.02] hover:bg-white/[0.05] transition-colors text-left"
-                  >
-                    <prompt.icon className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span className="text-sm font-medium text-zinc-300">{prompt.text}</span>
-                  </motion.button>
-                ))}
-              </div>
-            </motion.div>
+                <div className="space-y-2 w-full max-w-md">
+                  {SUGGESTED_PROMPTS.map((prompt, i) => (
+                    <motion.button
+                      key={i}
+                      whileHover={{ scale: 1.01, x: 4 }}
+                      whileTap={{ scale: 0.99 }}
+                      onClick={() => handleSubmit(prompt.text)}
+                      className="group flex items-center justify-between p-3 rounded-lg border border-transparent hover:border-white/10 hover:bg-white/[0.02] transition-all text-left w-full"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0 group-hover:bg-zinc-800 transition-colors">
+                          <prompt.icon className="h-4 w-4 text-zinc-400 group-hover:text-zinc-200 transition-colors" />
+                        </div>
+                        <span className="text-sm font-medium text-zinc-300 group-hover:text-white transition-colors">{prompt.text}</span>
+                      </div>
+                      <div className="opacity-0 group-hover:opacity-100 text-xs text-zinc-500 font-mono transition-opacity">
+                        ↵
+                      </div>
+                    </motion.button>
+                  ))}
+                </div>
+              </motion.div>
+
+              {/* Right Column: System Status */}
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.5, ease: "easeOut", delay: 0.1 }}
+                className="w-full lg:w-72 shrink-0"
+              >
+                <div className="rounded-xl border border-white/5 bg-zinc-950/50 p-5 backdrop-blur-sm space-y-6">
+                  <div>
+                    <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">System Status</h3>
+                    
+                    <div className="space-y-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <Cpu className="h-4 w-4 text-emerald-400" />
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium text-zinc-200">Local Inference</span>
+                            <span className="text-xs text-zinc-500">qwen3:4b (Ollama)</span>
+                          </div>
+                        </div>
+                        <CheckCircle2 className="h-4 w-4 text-emerald-400/80" />
+                      </div>
+
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <Database className="h-4 w-4 text-blue-400" />
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium text-zinc-200">Vector Memory</span>
+                            <span className="text-xs text-zinc-500">Qdrant Connected</span>
+                          </div>
+                        </div>
+                        <CheckCircle2 className="h-4 w-4 text-blue-400/80" />
+                      </div>
+
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <HardDrive className="h-4 w-4 text-amber-400" />
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium text-zinc-200">Storage</span>
+                            <span className="text-xs text-zinc-500">Local File System</span>
+                          </div>
+                        </div>
+                        <CheckCircle2 className="h-4 w-4 text-amber-400/80" />
+                      </div>
+                      
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <Network className="h-4 w-4 text-purple-400" />
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium text-zinc-200">Tools</span>
+                            <span className="text-xs text-zinc-500">Web, Bash, API</span>
+                          </div>
+                        </div>
+                        <CheckCircle2 className="h-4 w-4 text-purple-400/80" />
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="pt-4 border-t border-zinc-800/50">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-zinc-500">Data Privacy</span>
+                      <span className="text-emerald-400 font-medium bg-emerald-400/10 px-2 py-0.5 rounded-full">100% Local</span>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
           ) : (
             <AnimatePresence>
               {messages.map((m, idx) => {
@@ -562,7 +634,7 @@ export function ChatArea() {
       </div>
 
       <div className="absolute bottom-0 w-full z-20 bg-gradient-to-t from-background via-background to-transparent pt-10 pb-6 px-4 md:px-8">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-4xl mx-auto">
           <ChatInput
             onSubmit={handleSubmit}
             onStop={handleStop}

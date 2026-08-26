@@ -65,9 +65,34 @@ export function Sidebar() {
   }, []);
 
   const sortedSessions = [...sessions].sort((a, b) => {
-    if (a.is_pinned && !b.is_pinned) return -1;
-    if (!a.is_pinned && b.is_pinned) return 1;
     return new Date(b.updated_at || b.updatedAt).getTime() - new Date(a.updated_at || a.updatedAt).getTime();
+  });
+
+  const pinnedSessions = sortedSessions.filter(s => s.is_pinned);
+  const unpinnedSessions = sortedSessions.filter(s => !s.is_pinned);
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const sevenDaysAgo = new Date(today);
+  sevenDaysAgo.setDate(today.getDate() - 7);
+
+  const todaySessions = unpinnedSessions.filter(s => {
+    const d = new Date(s.updated_at || s.updatedAt);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime() >= today.getTime();
+  });
+
+  const previous7DaysSessions = unpinnedSessions.filter(s => {
+    const d = new Date(s.updated_at || s.updatedAt);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime() >= sevenDaysAgo.getTime() && d.getTime() < today.getTime();
+  });
+
+  const olderSessions = unpinnedSessions.filter(s => {
+    const d = new Date(s.updated_at || s.updatedAt);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime() < sevenDaysAgo.getTime();
   });
 
   const loadSession = async (id: string) => {
@@ -174,6 +199,76 @@ export function Sidebar() {
     localStorage.setItem("sidebarCollapsed", newVal.toString());
   };
 
+  const renderSessionItem = (s: any) => {
+    const isActive = activeSessionId === s.id;
+    return (
+      <div key={s.id} className="group relative">
+        <button
+          onClick={() => loadSession(s.id)}
+          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors text-left pr-16 ${
+            isActive
+              ? "bg-zinc-800/60 text-zinc-200 font-medium"
+              : "text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-300"
+          }`}
+        >
+          <MessageSquare
+            className={`h-4 w-4 shrink-0 ${isActive ? "text-zinc-300" : "text-zinc-600"}`}
+          />
+          {editingId === s.id ? (
+            <Input
+              autoFocus
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              onBlur={(e) => handleRenameSubmit(e, s.id)}
+              onKeyDown={(e) => handleRenameSubmit(e, s.id)}
+              className="h-6 text-sm bg-zinc-900 border-zinc-700 focus-visible:ring-1 focus-visible:ring-zinc-500 px-1"
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span className="truncate">{s.title || "New Thread"}</span>
+          )}
+        </button>
+        
+        {editingId !== s.id && (
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={(e) => handleAction(e, 'pin', s)}
+              className={`p-1 rounded hover:bg-zinc-700/50 ${s.is_pinned ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              <Pin className="h-3.5 w-3.5" />
+            </button>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  onClick={(e) => e.stopPropagation()}
+                  className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50"
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48 bg-zinc-950 border-white/10 text-zinc-300">
+                <DropdownMenuItem onClick={(e) => handleAction(e as any, 'rename', s)} className="gap-2 cursor-pointer focus:bg-zinc-800 focus:text-white">
+                  <Edit2 className="h-4 w-4" /> Rename
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={(e) => handleAction(e as any, 'share', s)} className="gap-2 cursor-pointer focus:bg-zinc-800 focus:text-white">
+                  <Share className="h-4 w-4" /> Share
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={(e) => handleAction(e as any, 'archive', s)} className="gap-2 cursor-pointer focus:bg-zinc-800 focus:text-white">
+                  <Archive className="h-4 w-4" /> Archive
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className="bg-white/10" />
+                <DropdownMenuItem onClick={(e) => handleAction(e as any, 'delete', s)} className="gap-2 cursor-pointer text-red-400 focus:bg-red-500/10 focus:text-red-300">
+                  <Trash className="h-4 w-4" /> Delete
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   if (isCollapsed) {
     return (
       <div className="w-14 border-r border-zinc-800/50 bg-[#09090b] flex flex-col h-full shrink-0 items-center py-4 relative z-20 transition-all duration-300">
@@ -260,81 +355,36 @@ export function Sidebar() {
       </div>
 
       <ScrollArea className="flex-1 px-2">
-        <div className="space-y-0.5 mt-2">
+        <div className="space-y-4 mt-2 pb-4">
           {sortedSessions.length === 0 ? (
             <div className="px-3 py-4 text-xs text-zinc-600 font-medium">No previous threads.</div>
           ) : (
-            sortedSessions.map((s) => {
-              // Ensure we check routing/store active state correctly
-              const isActive = activeSessionId === s.id;
-              
-              return (
-              <div key={s.id} className="group relative">
-                <button
-                  onClick={() => loadSession(s.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors text-left pr-16 ${
-                    isActive
-                      ? "bg-zinc-800/60 text-zinc-200 font-medium"
-                      : "text-zinc-400 hover:bg-zinc-900/50 hover:text-zinc-300"
-                  }`}
-                >
-                  <MessageSquare
-                    className={`h-4 w-4 shrink-0 ${isActive ? "text-zinc-300" : "text-zinc-600"}`}
-                  />
-                  {editingId === s.id ? (
-                    <Input
-                      autoFocus
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      onBlur={(e) => handleRenameSubmit(e, s.id)}
-                      onKeyDown={(e) => handleRenameSubmit(e, s.id)}
-                      className="h-6 text-sm bg-zinc-900 border-zinc-700 focus-visible:ring-1 focus-visible:ring-zinc-500 px-1"
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  ) : (
-                    <span className="truncate">{s.title || "New Thread"}</span>
-                  )}
-                </button>
-                
-                {editingId !== s.id && (
-                  <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={(e) => handleAction(e, 'pin', s)}
-                      className={`p-1 rounded hover:bg-zinc-700/50 ${s.is_pinned ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
-                    >
-                      <Pin className="h-3.5 w-3.5" />
-                    </button>
-                    
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <button
-                          onClick={(e) => e.stopPropagation()}
-                          className="p-1 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50"
-                        >
-                          <MoreHorizontal className="h-3.5 w-3.5" />
-                        </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48 bg-zinc-950 border-white/10 text-zinc-300">
-                        <DropdownMenuItem onClick={(e) => handleAction(e as any, 'rename', s)} className="gap-2 cursor-pointer focus:bg-zinc-800 focus:text-white">
-                          <Edit2 className="h-4 w-4" /> Rename
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => handleAction(e as any, 'share', s)} className="gap-2 cursor-pointer focus:bg-zinc-800 focus:text-white">
-                          <Share className="h-4 w-4" /> Share
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => handleAction(e as any, 'archive', s)} className="gap-2 cursor-pointer focus:bg-zinc-800 focus:text-white">
-                          <Archive className="h-4 w-4" /> Archive
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator className="bg-white/10" />
-                        <DropdownMenuItem onClick={(e) => handleAction(e as any, 'delete', s)} className="gap-2 cursor-pointer text-red-400 focus:bg-red-500/10 focus:text-red-300">
-                          <Trash className="h-4 w-4" /> Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                )}
-              </div>
-            );
-          })
+            <>
+              {pinnedSessions.length > 0 && (
+                <div className="space-y-0.5">
+                  <div className="px-3 py-1.5 text-xs font-semibold text-zinc-500">Pinned</div>
+                  {pinnedSessions.map(renderSessionItem)}
+                </div>
+              )}
+              {todaySessions.length > 0 && (
+                <div className="space-y-0.5">
+                  <div className="px-3 py-1.5 text-xs font-semibold text-zinc-500">Today</div>
+                  {todaySessions.map(renderSessionItem)}
+                </div>
+              )}
+              {previous7DaysSessions.length > 0 && (
+                <div className="space-y-0.5">
+                  <div className="px-3 py-1.5 text-xs font-semibold text-zinc-500">Previous 7 Days</div>
+                  {previous7DaysSessions.map(renderSessionItem)}
+                </div>
+              )}
+              {olderSessions.length > 0 && (
+                <div className="space-y-0.5">
+                  <div className="px-3 py-1.5 text-xs font-semibold text-zinc-500">Older</div>
+                  {olderSessions.map(renderSessionItem)}
+                </div>
+              )}
+            </>
           )}
         </div>
       </ScrollArea>
