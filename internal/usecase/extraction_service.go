@@ -9,11 +9,11 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/fumiama/go-docx"
-	"github.com/ledongthuc/pdf"
 	"github.com/rs/zerolog"
 )
 
@@ -160,7 +160,7 @@ func (s *extractionService) florencePost(ctx context.Context, endpoint string, i
 func (s *extractionService) extractFromPDF(ctx context.Context, fileBytes []byte) (string, error) {
 	start := time.Now()
 
-	// ledongthuc/pdf needs a io.ReaderAt + size — use temp file
+	// Write PDF bytes to temp file
 	tmpFile, err := os.CreateTemp("", "pdfextract-*.pdf")
 	if err != nil {
 		return "", fmt.Errorf("create temp pdf: %w", err)
@@ -174,65 +174,31 @@ func (s *extractionService) extractFromPDF(ctx context.Context, fileBytes []byte
 	}
 	tmpFile.Close()
 
-	pdfFile, reader, err := pdf.Open(tmpPath)
+	// Use pdftotext to extract text
+	// -enc UTF-8: ensure UTF-8 output
+	// -nopgbrk: don't insert page breaks between pages
+	cmd := exec.CommandContext(ctx, "pdftotext", "-enc", "UTF-8", "-nopgbrk", tmpPath, "-")
+	
+	output, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("open pdf: %w", err)
-	}
-	defer pdfFile.Close()
-
-	totalPages := reader.NumPage()
-	s.logger.Info().
-		Int("pages", totalPages).
-		Dur("parse_duration", time.Since(start)).
-		Msg("PDF opened")
-
-	var textBuilder strings.Builder
-	emptyPages := 0
-
-	for i := 1; i <= totalPages; i++ {
-		page := reader.Page(i)
-		if page.V.IsNull() {
-			emptyPages++
-			continue
-		}
-
-		pageText, err := page.GetPlainText(nil)
-		if err != nil {
-			s.logger.Warn().
-				Int("page", i).
-				Err(err).
-				Msg("Failed to extract text from PDF page")
-			emptyPages++
-			continue
-		}
-
-		trimmed := strings.TrimSpace(pageText)
-		if trimmed == "" {
-			emptyPages++
-			continue
-		}
-
-		if textBuilder.Len() > 0 {
-			textBuilder.WriteString("\n\n")
-		}
-		textBuilder.WriteString(trimmed)
+		s.logger.Warn().Err(err).Msg("pdftotext failed, ensuring poppler-utils is installed")
+		return "", fmt.Errorf("pdftotext execution failed: %w", err)
 	}
 
-	// If all pages empty → likely scanned PDF, fallback to Florence vision
-	if textBuilder.Len() == 0 && emptyPages > 0 {
-		s.logger.Info().
-			Int("empty_pages", emptyPages).
-			Msg("PDF has no text layer, falling back to Florence OCR")
+	extractedText := strings.TrimSpace(string(output))
+
+	// If result is empty → likely scanned PDF, fallback to Florence vision
+	if extractedText == "" {
+		s.logger.Info().Msg("PDF has no text layer, falling back to Florence OCR")
 		return s.extractFromImageViaFlorence(ctx, fileBytes, "image/png")
 	}
 
 	s.logger.Info().
-		Int("pages_with_text", totalPages-emptyPages).
-		Int("empty_pages", emptyPages).
-		Int("total_chars", textBuilder.Len()).
-		Msg("PDF text extraction done")
+		Int("text_length", len(extractedText)).
+		Dur("parse_duration", time.Since(start)).
+		Msg("PDF text extracted via pdftotext")
 
-	return textBuilder.String(), nil
+	return extractedText, nil
 }
 
 // extractFromDOCX extracts text from DOCX files

@@ -16,11 +16,13 @@ import (
 	"github.com/achmichael/pribadi-go/internal/delivery/scheduler"
 	"github.com/achmichael/pribadi-go/internal/delivery/rest"
 	"github.com/achmichael/pribadi-go/internal/tools"
+	"github.com/achmichael/pribadi-go/internal/delivery/telegram"
 	"github.com/achmichael/pribadi-go/internal/delivery/webhook"
 	"github.com/achmichael/pribadi-go/internal/delivery/whatsapp"
 	"github.com/achmichael/pribadi-go/internal/factmemory"
 	"github.com/achmichael/pribadi-go/internal/identity"
 	"github.com/achmichael/pribadi-go/internal/logger"
+	"github.com/achmichael/pribadi-go/internal/orchestrator"
 	"github.com/achmichael/pribadi-go/internal/prompt"
 	"github.com/achmichael/pribadi-go/internal/reasoning"
 	"github.com/achmichael/pribadi-go/internal/repository"
@@ -34,6 +36,8 @@ import (
     authhttp "github.com/achmichael/pribadi-go/internal/auth/transport/http"
 	"github.com/achmichael/pribadi-go/pkg/ollama"
 	"github.com/achmichael/pribadi-go/pkg/utils"
+	tele "gopkg.in/telebot.v3"
+	"time"
 )
 
 type messageRouterAdapter struct {
@@ -115,7 +119,6 @@ func main() {
 	dashboardService := usecase.NewDashboardService(dashboardRepo, cfg.DashboardJWT, log.Logger)
 	
 	resolver := identity.NewResolver(sqlite, log.Logger)
-	refResolver := usecase.NewReferenceResolver(ollamaClient, sqlite, log.Logger)
 	embedder := utils.NewOllamaEmbedder(cfg.OllamaBaseURL, "nomic-embed-text")
 	
 	// ── Pipeline Components ────────────────────────────────────────
@@ -134,18 +137,13 @@ func main() {
 	responseProcessor := response.NewProcessor(stateManager, memory, sqlite, log.Logger)
 	interactionLogger := response.NewInteractionLogger(sqlite, log.Logger)
 	
-	orchestrator := usecase.NewOrchestrator(
-		waClient,
-		transcription,
-		extraction,
+	coreOrch := orchestrator.NewCoreOrchestrator(
 		ragIngest,
 		ragRetrieve,
 		ollamaClient,
 		sqlite,
 		dashboardRepo,
 		memory,
-		resolver,
-		refResolver,
 		embedder,
 		stateManager,
 		prefManager,
@@ -160,10 +158,38 @@ func main() {
 		log.Logger,
 	)
 
+	// WhatsApp Adapters
+	waInbound := whatsapp.NewInboundAdapter(waClient, transcription, extraction, resolver, sqlite, log.Logger)
+	waOutbound := whatsapp.NewOutboundAdapter(waClient, log.Logger)
+	waOrchestrator := usecase.NewOrchestrator(coreOrch, waInbound, waOutbound, log.Logger)
+
+	// Web Adapters
+	webInbound := rest.NewInboundAdapter(webChatRepo, extraction, log.Logger)
+
 	// WhatsApp Event Listener
-	routerAdapter := &messageRouterAdapter{orchestrator: orchestrator}
+	routerAdapter := &messageRouterAdapter{orchestrator: waOrchestrator}
 	eventListener := whatsapp.NewEventListener(waClient.GetClient(), routerAdapter, log.Logger)
 	eventListener.Start()
+
+	// Telegram Adapters
+	var tgClient *telegram.Client
+	if cfg.TelegramToken != "" {
+		pref := tele.Settings{
+			Token:  cfg.TelegramToken,
+			Poller: &tele.LongPoller{Timeout: 10 * time.Second},
+		}
+
+		bot, err := tele.NewBot(pref)
+		if err != nil {
+			log.Error().Err(err).Msg("Failed to start Telegram bot")
+		} else {
+			tgInbound := telegram.NewInboundAdapter(bot, transcription, extraction, resolver, sqlite, log.Logger)
+			tgOutbound := telegram.NewOutboundAdapter(bot, log.Logger)
+			
+			tgClient = telegram.NewClient(bot, coreOrch, tgInbound, tgOutbound, log.Logger)
+			tgClient.Start()
+		}
+	}
 
 	// Webhook
 	whHandler := webhook.NewHandler(notification, cfg.WebhookSecret, log.Logger)
@@ -183,7 +209,16 @@ func main() {
 	// Create default user if not exists
 	_ = dashboardService.CreateDefaultUser(context.Background(), "admin", "admin123")
 	
-	dashboardServer := rest.NewServer(dashboardService, webChatService, cfg.DashboardJWT, log.Logger, cfg.DashboardPort)
+	dashboardServer := rest.NewServer(
+		dashboardService,
+		webChatService,
+		webChatRepo,
+		coreOrch,
+		webInbound,
+		cfg.DashboardJWT,
+		log.Logger,
+		cfg.DashboardPort,
+	)
 
     // Auth Module setup
     pgDB, err := sql.Open("postgres", cfg.PostgresDSN)

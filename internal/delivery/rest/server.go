@@ -15,6 +15,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog"
 
+	"github.com/achmichael/pribadi-go/internal/orchestrator"
+	"github.com/achmichael/pribadi-go/internal/repository"
 	"github.com/achmichael/pribadi-go/internal/usecase"
 )
 
@@ -52,8 +54,12 @@ type Server struct {
 	port           string
 	service        usecase.DashboardService
 	webChatService usecase.WebChatService
+	webChatRepo    repository.WebChatRepository
 	jwtKey         []byte
 	rateLimiter    *RateLimiter
+
+	coreOrchestrator  orchestrator.CoreOrchestrator
+	webInboundAdapter orchestrator.InboundAdapter
 }
 
 func (s *Server) Router() *chi.Mux {
@@ -61,7 +67,16 @@ func (s *Server) Router() *chi.Mux {
 }
 
 // NewServer creates a new dashboard REST API server
-func NewServer(service usecase.DashboardService, webChatService usecase.WebChatService, jwtSecret string, logger *zerolog.Logger, port string) *Server {
+func NewServer(
+	service usecase.DashboardService,
+	webChatService usecase.WebChatService,
+	webChatRepo repository.WebChatRepository,
+	coreOrchestrator orchestrator.CoreOrchestrator,
+	webInboundAdapter orchestrator.InboundAdapter,
+	jwtSecret string,
+	logger *zerolog.Logger,
+	port string,
+) *Server {
 	r := chi.NewRouter()
 
 	// Middleware
@@ -82,13 +97,16 @@ func NewServer(service usecase.DashboardService, webChatService usecase.WebChatS
 	}))
 
 	srv := &Server{
-		router:         r,
-		logger:         logger,
-		port:           port,
-		service:        service,
-		webChatService: webChatService,
-		jwtKey:         []byte(jwtSecret),
-		rateLimiter:    newRateLimiter(),
+		router:            r,
+		logger:            logger,
+		port:              port,
+		service:           service,
+		webChatService:    webChatService,
+		webChatRepo:       webChatRepo,
+		jwtKey:            []byte(jwtSecret),
+		rateLimiter:       newRateLimiter(),
+		coreOrchestrator:  coreOrchestrator,
+		webInboundAdapter: webInboundAdapter,
 	}
 
 	// Routes

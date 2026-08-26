@@ -27,6 +27,7 @@ type Config struct {
 	DashboardJWT     string `envconfig:"DASHBOARD_JWT_SECRET" default:"pribadi-secret-key"`
 	EncryptionKey    string `envconfig:"ENCRYPTION_KEY" required:"true"`
 	PostgresDSN      string `envconfig:"POSTGRES_DSN" default:"postgres://app_dev:secretpass_local@localhost:5432/app_private_db?sslmode=disable"`
+	TelegramToken    string `envconfig:"TELEGRAM_TOKEN" default:""`
 }
 
 // Load reads configuration from .env file and environment variables

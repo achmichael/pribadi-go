@@ -28,7 +28,7 @@ async function uploadFile(file: File, signal?: AbortSignal): Promise<string | nu
   const res = await fetch(`${API_BASE}/chat/upload`, {
     method: "POST",
     headers: {
-      ...getAuthHeader()
+      ...getAuthHeader(),
     },
     body: formData,
     signal,
@@ -39,15 +39,15 @@ async function uploadFile(file: File, signal?: AbortSignal): Promise<string | nu
   return job.id || null;
 }
 
-const ChatInput = memo(function ChatInput({ 
-  onSubmit, 
-  onStop, 
-  isStreaming, 
-  attachedFile, 
-  setAttachedFile 
-}: { 
-  onSubmit: (text: string) => void; 
-  onStop: () => void; 
+const ChatInput = memo(function ChatInput({
+  onSubmit,
+  onStop,
+  isStreaming,
+  attachedFile,
+  setAttachedFile,
+}: {
+  onSubmit: (text: string) => void;
+  onStop: () => void;
   isStreaming: boolean;
   attachedFile: AttachedFile | null;
   setAttachedFile: (file: AttachedFile | null) => void;
@@ -87,7 +87,10 @@ const ChatInput = memo(function ChatInput({
           </Button>
         ) : (
           <Button
-            onClick={() => { onSubmit(input); setInput(""); }}
+            onClick={() => {
+              onSubmit(input);
+              setInput("");
+            }}
             disabled={!canSubmit}
             size="icon"
             className={`rounded-xl h-9 w-9 transition-all duration-300 ${canSubmit ? "bg-white text-black hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"}`}
@@ -107,7 +110,7 @@ export function ChatArea() {
   const [historyError, setHistoryError] = useState<string | null>(null);
   const params = useParams();
   const router = useRouter();
-  
+
   const {
     messages,
     addMessage,
@@ -133,7 +136,7 @@ export function ChatArea() {
   useEffect(() => {
     const routeSessionId = params?.sessionId as string | undefined;
     const currentState = useChatStore.getState();
-    
+
     // If we're on /new, ensure state is clear
     if (!routeSessionId) {
       // Don't clear state if we just started streaming (e.g. transitioning from /new to /chat/[id])
@@ -143,14 +146,14 @@ export function ChatArea() {
       }
       return;
     }
-    
+
     // If route has sessionId but store doesn't match, update store and fetch
     if (routeSessionId && activeSessionId !== routeSessionId) {
       setActiveSessionId(routeSessionId);
-      
+
       setIsLoadingHistory(true);
       setHistoryError(null);
-      
+
       fetchApi(`/chat/sessions/${routeSessionId}/history`)
         .then((history) => {
           if (Array.isArray(history)) {
@@ -163,13 +166,13 @@ export function ChatArea() {
                 file_job_id: m.file_job_id,
                 file_name: m.file_name,
                 file_mime_type: m.file_mime_type,
-                file_size: m.file_size
-              }))
+                file_size: m.file_size,
+              })),
             );
           }
         })
         .catch((e) => {
-          if (e.message !== 'Unauthorized') {
+          if (e.message !== "Unauthorized") {
             console.error("Failed to load history", e);
             setHistoryError("Failed to load conversation history");
           }
@@ -210,24 +213,24 @@ export function ChatArea() {
     const displayText = text.trim();
 
     const tempId = Date.now().toString();
-    const newUserMessage: any = { 
-      id: tempId, 
-      role: "user", 
-      content: displayText, 
-      createdAt: new Date().toISOString()
+    const newUserMessage: any = {
+      id: tempId,
+      role: "user",
+      content: displayText,
+      createdAt: new Date().toISOString(),
     };
-    
+
     if (pendingFile) {
-      // Add fake/local properties for optimistic UI if possible, 
+      // Add fake/local properties for optimistic UI if possible,
       // but file_name is enough for basic display
       newUserMessage.file_name = pendingFile.file.name;
       newUserMessage.file_size = pendingFile.file.size;
       newUserMessage.file_mime_type = pendingFile.file.type;
-      
+
       // Store previewUrl internally in message if we want to render image preview
       // (This is a temporary hack for immediate display before refresh)
       if (pendingFile.previewUrl) {
-         newUserMessage._localPreview = pendingFile.previewUrl;
+        newUserMessage._localPreview = pendingFile.previewUrl;
       }
     }
     addMessage(newUserMessage);
@@ -266,7 +269,7 @@ export function ChatArea() {
         currentSessionId = result.id;
         setActiveSessionId(result.id);
         setSessions([...sessions, result]);
-        
+
         // Use Next.js router to gracefully replace the URL
         router.replace(`/chat/${result.id}`);
       } catch (e) {
@@ -367,8 +370,6 @@ export function ChatArea() {
     }
   };
 
-  const canSubmit = input.trim() || attachedFile;
-
   return (
     <div className="flex flex-col h-full w-full mx-auto relative overflow-hidden bg-background">
       <div className="ambient-blob bg-blue-500/20 w-[600px] h-[600px] top-[-200px] right-[10%]"></div>
@@ -459,9 +460,10 @@ export function ChatArea() {
 
                       {m.role === "user" && m.file_name && (
                         <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/50 max-w-[240px] mb-2 mt-1">
-                          {(m as any)._localPreview || (m.file_mime_type && m.file_mime_type.startsWith('image/')) ? (
+                          {(m as any)._localPreview ||
+                          (m.file_mime_type && m.file_mime_type.startsWith("image/")) ? (
                             <img
-                              src={(m as any)._localPreview || '/placeholder-image.png'}
+                              src={(m as any)._localPreview || "/placeholder-image.png"}
                               alt="preview"
                               className="h-8 w-8 rounded object-cover shrink-0"
                             />
@@ -476,9 +478,11 @@ export function ChatArea() {
                             </span>
                             {m.file_size && (
                               <span className="text-[10px] text-zinc-500">
-                                {m.file_size < 1024 ? `${m.file_size} B` : 
-                                 m.file_size < 1024 * 1024 ? `${(m.file_size / 1024).toFixed(1)} KB` : 
-                                 `${(m.file_size / (1024 * 1024)).toFixed(1)} MB`}
+                                {m.file_size < 1024
+                                  ? `${m.file_size} B`
+                                  : m.file_size < 1024 * 1024
+                                    ? `${(m.file_size / 1024).toFixed(1)} KB`
+                                    : `${(m.file_size / (1024 * 1024)).toFixed(1)} MB`}
                               </span>
                             )}
                           </div>
@@ -542,12 +546,12 @@ export function ChatArea() {
                         </div>
                       )}
 
-                      {isStreaming &&
-                        isLastAssistant &&
-                        !m.content && !m.thinking && <span className="streaming-cursor" />}
-                      {isStreaming &&
-                        isLastAssistant &&
-                        m.content && <span className="streaming-cursor" />}
+                      {isStreaming && isLastAssistant && !m.content && !m.thinking && (
+                        <span className="streaming-cursor" />
+                      )}
+                      {isStreaming && isLastAssistant && m.content && (
+                        <span className="streaming-cursor" />
+                      )}
                     </div>
                   </motion.div>
                 );
@@ -559,7 +563,7 @@ export function ChatArea() {
 
       <div className="absolute bottom-0 w-full z-20 bg-gradient-to-t from-background via-background to-transparent pt-10 pb-6 px-4 md:px-8">
         <div className="max-w-3xl mx-auto">
-          <ChatInput 
+          <ChatInput
             onSubmit={handleSubmit}
             onStop={handleStop}
             isStreaming={isStreaming}

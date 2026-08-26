@@ -17,7 +17,8 @@ type WebChatRepository interface {
 	UpdateSession(ctx context.Context, session domain.WebChatSession) error
 	DeleteSession(ctx context.Context, sessionID, userID string) error
 
-	// Messages
+	// Messages — DEPRECATED: Use Repository.InsertMessageV2 and Repository.ListMessagesByUserSession instead
+	// These methods are kept temporarily for backward compatibility during migration
 	CreateMessage(ctx context.Context, msg domain.WebChatMessage) error
 	ListMessages(ctx context.Context, sessionID string) ([]domain.WebChatMessage, error)
 

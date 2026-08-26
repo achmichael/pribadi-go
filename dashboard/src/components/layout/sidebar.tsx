@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MessageSquare, Plus, Command, LogOut, MoreHorizontal, Pin, Edit2, Share, Trash, Archive } from "lucide-react";
+import { MessageSquare, Plus, Command, LogOut, MoreHorizontal, Pin, Edit2, Share, Trash, Archive, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useChatStore } from "@/store/chat";
@@ -15,7 +15,6 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 
-import { SettingsModal } from "@/components/chat/settings-modal";
 import { Input } from "@/components/ui/input";
 
 export function Sidebar() {
@@ -25,6 +24,26 @@ export function Sidebar() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
+  const [username, setUsername] = useState<string | null>(null);
+
+  useEffect(() => {
+    // get user info from JWT payload
+    const token = localStorage.getItem("token");
+    if (token) {
+      try {
+        const payloadBase64 = token.split('.')[1];
+        if (payloadBase64) {
+          const payloadJson = atob(payloadBase64);
+          const payload = JSON.parse(payloadJson);
+          if (payload && payload.username) {
+            setUsername(payload.username);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to parse token", e);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     fetchApi("/chat/sessions")
@@ -204,7 +223,14 @@ export function Sidebar() {
       </ScrollArea>
 
       <div className="p-3 mt-auto border-t border-zinc-800/50 space-y-2">
-        <SettingsModal />
+        <Button
+          variant="ghost"
+          className="w-full justify-start text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50"
+          onClick={() => router.push('/settings')}
+        >
+          <Settings className="h-4 w-4 mr-2" />
+          {username || "Settings"}
+        </Button>
         <Button
           variant="ghost"
           className="w-full justify-start text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50"

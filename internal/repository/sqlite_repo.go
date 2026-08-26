@@ -99,6 +99,9 @@ type Repository interface {
 	// ── New: user documents ──
 	DeleteAllUserDocuments(ctx context.Context, userID string) error
 	
+	// ── New: session management ──
+	GetOrCreateActiveSession(ctx context.Context, userID, platform string, maxIdleMinutes int) (sessionID string, isNew bool, err error)
+	
 	Close() error
 }
 
@@ -852,4 +855,29 @@ func (r *sqliteRepo) DeleteAllUserDocuments(ctx context.Context, userID string) 
 		return err
 	}
 	return nil
+}
+
+func (r *sqliteRepo) GetOrCreateActiveSession(ctx context.Context, userID, platform string, maxIdleMinutes int) (string, bool, error) {
+	var sessionID string
+	var lastActivity time.Time
+
+	err := r.db.QueryRowContext(ctx, `
+		SELECT session_id, MAX(created_at) as last_activity
+		FROM messages_v2
+		WHERE user_id = ? AND platform = ?
+		GROUP BY session_id
+		ORDER BY last_activity DESC
+		LIMIT 1
+	`, userID, platform).Scan(&sessionID, &lastActivity)
+
+	if err == sql.ErrNoRows || time.Since(lastActivity) > time.Duration(maxIdleMinutes)*time.Minute {
+		newSessionID := fmt.Sprintf("%s-%s-%d", platform, userID, time.Now().Unix())
+		return newSessionID, true, nil
+	}
+
+	if err != nil {
+		return "", false, err
+	}
+
+	return sessionID, false, nil
 }
