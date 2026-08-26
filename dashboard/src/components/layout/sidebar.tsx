@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { MessageSquare, Plus, Command, LogOut, MoreHorizontal, Pin, Edit2, Share, Trash, Archive, Settings } from "lucide-react";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { MessageSquare, Plus, Command, LogOut, MoreHorizontal, Pin, Edit2, Share, Trash, Archive, Settings, PanelLeftClose, PanelLeftOpen, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useChatStore } from "@/store/chat";
@@ -25,6 +25,13 @@ export function Sidebar() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [username, setUsername] = useState<string | null>(null);
+
+  // Resize and Collapse State
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [width, setWidth] = useState(260); // Default width 260px
+  const [isResizing, setIsResizing] = useState(false);
+  const minWidth = 200;
+  const maxWidth = 480;
 
   useEffect(() => {
     // get user info from JWT payload
@@ -120,15 +127,125 @@ export function Sidebar() {
     }
   };
 
+  // Retrieve saved width and collapse state from localStorage
+  useEffect(() => {
+    const savedWidth = localStorage.getItem("sidebarWidth");
+    if (savedWidth) {
+      setWidth(parseInt(savedWidth, 10));
+    }
+    const savedCollapsed = localStorage.getItem("sidebarCollapsed");
+    if (savedCollapsed) {
+      setIsCollapsed(savedCollapsed === "true");
+    }
+  }, []);
+
+  const handleResize = useCallback((e: MouseEvent) => {
+    if (!isResizing) return;
+    const newWidth = Math.min(Math.max(e.clientX, minWidth), maxWidth);
+    setWidth(newWidth);
+    localStorage.setItem("sidebarWidth", newWidth.toString());
+  }, [isResizing]);
+
+  const stopResizing = useCallback(() => {
+    setIsResizing(false);
+    document.body.style.cursor = 'default';
+  }, []);
+
+  useEffect(() => {
+    if (isResizing) {
+      window.addEventListener("mousemove", handleResize);
+      window.addEventListener("mouseup", stopResizing);
+      document.body.style.cursor = 'col-resize';
+    } else {
+      window.removeEventListener("mousemove", handleResize);
+      window.removeEventListener("mouseup", stopResizing);
+      document.body.style.cursor = 'default';
+    }
+    return () => {
+      window.removeEventListener("mousemove", handleResize);
+      window.removeEventListener("mouseup", stopResizing);
+      document.body.style.cursor = 'default';
+    };
+  }, [isResizing, handleResize, stopResizing]);
+
+  const toggleCollapse = () => {
+    const newVal = !isCollapsed;
+    setIsCollapsed(newVal);
+    localStorage.setItem("sidebarCollapsed", newVal.toString());
+  };
+
+  if (isCollapsed) {
+    return (
+      <div className="w-14 border-r border-zinc-800/50 bg-[#09090b] flex flex-col h-full shrink-0 items-center py-4 relative z-20 transition-all duration-300">
+        <button 
+          onClick={toggleCollapse} 
+          className="p-2 mb-4 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800/50 transition-colors"
+          title="Expand Sidebar"
+        >
+          <PanelLeftOpen className="h-5 w-5" />
+        </button>
+        
+        <button 
+          onClick={createNewSession}
+          className="p-2 mb-4 rounded-md bg-zinc-800 text-zinc-200 hover:bg-zinc-700 transition-colors"
+          title="New Thread"
+        >
+          <Plus className="h-5 w-5" />
+        </button>
+
+        <div className="flex-1 overflow-hidden" />
+
+        <div className="space-y-4">
+          <button 
+            onClick={() => router.push('/settings')}
+            className="p-2 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800/50 transition-colors block"
+            title="Settings"
+          >
+            <Settings className="h-5 w-5" />
+          </button>
+          
+          <button 
+            onClick={handleLogout}
+            className="p-2 rounded-md text-zinc-400 hover:text-red-400 hover:bg-zinc-800/50 transition-colors block"
+            title="Logout"
+          >
+            <LogOut className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="w-64 border-r border-zinc-800/50 bg-[#09090b] flex flex-col h-full shrink-0 relative z-20">
+    <div 
+      className="border-r border-zinc-800/50 bg-[#09090b] flex flex-col h-full shrink-0 relative z-20 group/sidebar transition-all duration-300 ease-in-out"
+      style={{ width: `${width}px` }}
+    >
+      {/* Resizer Handle */}
+      <div 
+        className="absolute right-0 top-0 w-1.5 h-full cursor-col-resize opacity-0 group-hover/sidebar:opacity-100 hover:bg-white/10 z-30 flex items-center justify-center transition-colors"
+        onMouseDown={(e) => {
+          e.preventDefault();
+          setIsResizing(true);
+        }}
+      >
+        <div className="h-8 w-1 rounded-full bg-zinc-600" />
+      </div>
+
       <div className="h-16 flex items-center justify-between px-4 border-b border-zinc-800/50">
-        <div className="flex items-center gap-2 text-zinc-200 font-medium tracking-tight">
-          <div className="h-6 w-6 rounded bg-white text-black flex items-center justify-center">
+        <div className="flex items-center gap-2 text-zinc-200 font-medium tracking-tight overflow-hidden">
+          <div className="h-6 w-6 shrink-0 rounded bg-white text-black flex items-center justify-center">
             <Command className="h-3 w-3" />
           </div>
-          pribadi-go
+          <span className="truncate">pribadi-go</span>
         </div>
+        <button 
+          onClick={toggleCollapse} 
+          className="p-1.5 shrink-0 rounded-md text-zinc-500 hover:text-white hover:bg-zinc-800/50 transition-colors"
+          title="Collapse Sidebar"
+        >
+          <PanelLeftClose className="h-4 w-4" />
+        </button>
       </div>
 
       <div className="p-3">
