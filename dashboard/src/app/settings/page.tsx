@@ -6,61 +6,73 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+
 import { 
   User, 
   Settings, 
   Paintbrush, 
   LogOut,
-  Bot,
-  Key,
   Database,
   Trash2,
-  FileText
+  FileText,
+  Cpu,
+  Link as LinkIcon,
+  Smartphone,
+  Globe,
+  Plus
 } from "lucide-react";
 import { fetchApi } from "@/lib/api";
 
-type Tab = 'preferences' | 'personalize' | 'config' | 'storage' | 'logout';
+type Tab = 'preferences' | 'personalize' | 'models' | 'connections' | 'storage' | 'logout';
 
 export default function SettingsPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<Tab>('config');
+  const [activeTab, setActiveTab] = useState<Tab>('preferences');
 
-  // Config State
-  const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [formData, setFormData] = useState({
-    systemPrompt: "",
-    openAIKey: "",
-    anthropicKey: ""
-  });
-  const [keyStatus, setKeyStatus] = useState({
-    hasOpenAI: false,
-    hasAnthropic: false
-  });
+  // Preferences State
+  const [prefLang, setPrefLang] = useState('en');
+  const [prefLanding, setPrefLanding] = useState('new');
+  const [prefAutoArchive, setPrefAutoArchive] = useState('');
+  const [prefTimezone, setPrefTimezone] = useState('UTC');
 
+  // Personalize State
+  const [persNickname, setPersNickname] = useState('');
+  const [persSystemPrompt, setPersSystemPrompt] = useState('');
+  const [persStyle, setPersStyle] = useState('concise');
+  const [persReplyLang, setPersReplyLang] = useState('en');
+
+  // Memory manager mock data
+  const [memoryFacts, setMemoryFacts] = useState([
+    { id: '1', fact: 'User likes concise answers', date: '2026-08-20', source: 'Thread 1' }
+  ]);
+
+  // Models State
+  const [modelSaving, setModelSaving] = useState(false);
+  const [modelChanged, setModelChanged] = useState(false);
+  const [plannerModel, setPlannerModel] = useState('qwen3:4b');
+  const [executorModel, setExecutorModel] = useState('qwen3:4b');
+  const [diagModel, setDiagModel] = useState('qwen3:4b');
+  const [keepAlive, setKeepAlive] = useState([5]);
+  const [thinkMode, setThinkMode] = useState({ planner: true, executor: false, diag: false });
+  
   // Storage State
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [uploads, setUploads] = useState<any[]>([]);
   const [loadingUploads, setLoadingUploads] = useState(false);
 
-  useEffect(() => {
-    fetchApi('/chat/settings')
-      .then(data => {
-        setFormData(prev => ({
-          ...prev,
-          systemPrompt: data.system_prompt || ""
-        }));
-        setKeyStatus({
-          hasOpenAI: !!data.has_openai_key,
-          hasAnthropic: !!data.has_anthropic_key
-        });
-        setLoading(false);
-      })
-      .catch(err => {
-        console.error("Failed to load settings:", err);
-        setLoading(false);
-      });
-  }, []);
+  // Autosave simulation
+  const handleAutoSave = (field: string, value: any) => {
+    // In real app, make API call here and show toast
+    console.log(`Auto-saved ${field}: ${value}`);
+  };
 
   useEffect(() => {
     if (activeTab === 'storage') {
@@ -88,240 +100,675 @@ export default function SettingsPage() {
     }
   };
 
-  const handlePurgeUploads = async () => {
-    if (!confirm("Are you sure you want to delete ALL uploaded files? This cannot be undone.")) return;
-    try {
-      await fetchApi('/chat/uploads', { method: 'DELETE' });
-      setUploads([]);
-    } catch (err) {
-      console.error("Failed to purge uploads", err);
-    }
-  };
-
   const handleLogout = () => {
     localStorage.removeItem("token");
     router.push("/login");
-  };
-
-  const handleSaveConfig = async () => {
-    setSaving(true);
-    try {
-      await fetchApi('/chat/settings', {
-        method: 'PUT',
-        body: JSON.stringify({
-          system_prompt: formData.systemPrompt,
-          openai_key: formData.openAIKey,
-          anthropic_key: formData.anthropicKey
-        })
-      });
-      // Update key status based on whether new keys were provided
-      if (formData.openAIKey) setKeyStatus(prev => ({ ...prev, hasOpenAI: true }));
-      if (formData.anthropicKey) setKeyStatus(prev => ({ ...prev, hasAnthropic: true }));
-      
-      // Clear input fields for security, but keep system prompt
-      setFormData(prev => ({ ...prev, openAIKey: "", anthropicKey: "" })); 
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setSaving(false);
-    }
   };
 
   const renderTabContent = () => {
     switch (activeTab) {
       case 'preferences':
         return (
-          <div className="space-y-6">
+          <div className="space-y-8 max-w-2xl">
             <div>
               <h3 className="text-lg font-medium text-white">General Preferences</h3>
-              <p className="text-sm text-zinc-400">Manage your general application settings.</p>
+              <p className="text-sm text-zinc-400">Manage your application UI settings.</p>
             </div>
-            <div className="h-px bg-zinc-800" />
-            <div className="text-zinc-500 text-sm italic">Coming soon...</div>
+            
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <Label className="text-zinc-300">Language (UI)</Label>
+                <Select value={prefLang} onValueChange={(v) => { setPrefLang(v); handleAutoSave('lang', v); }}>
+                  <SelectTrigger className="w-full bg-zinc-900 border-zinc-800 text-zinc-300">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200">
+                    <SelectItem value="en" className="focus:bg-zinc-900 focus:text-white">English</SelectItem>
+                    <SelectItem value="id" className="focus:bg-zinc-900 focus:text-white">Bahasa Indonesia</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-3">
+                <Label className="text-zinc-300">Default Landing</Label>
+                <RadioGroup value={prefLanding} onValueChange={(v) => { setPrefLanding(v); handleAutoSave('landing', v); }} className="space-y-2">
+                  <div className="flex items-center space-x-2 text-zinc-300">
+                    <RadioGroupItem value="new" id="r1" className="border-zinc-700 text-zinc-300" />
+                    <Label htmlFor="r1">Always new thread</Label>
+                  </div>
+                  <div className="flex items-center space-x-2 text-zinc-300">
+                    <RadioGroupItem value="last" id="r2" className="border-zinc-700 text-zinc-300" />
+                    <Label htmlFor="r2">Last opened thread</Label>
+                  </div>
+                </RadioGroup>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-zinc-300">Thread Auto-archive (Days)</Label>
+                <Input 
+                  type="number" 
+                  placeholder="0 (Disabled)" 
+                  value={prefAutoArchive}
+                  onChange={(e) => { setPrefAutoArchive(e.target.value); handleAutoSave('archive_days', e.target.value); }}
+                  className="bg-zinc-900 border-zinc-800 text-zinc-300 placeholder:text-zinc-600"
+                />
+                <p className="text-xs text-zinc-500">Leave empty or 0 to disable auto-archiving.</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-zinc-300">Timezone</Label>
+                <Select value={prefTimezone} onValueChange={(v) => { setPrefTimezone(v); handleAutoSave('timezone', v); }}>
+                  <SelectTrigger className="w-full bg-zinc-900 border-zinc-800 text-zinc-300">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200">
+                    <SelectItem value="UTC" className="focus:bg-zinc-900 focus:text-white">UTC</SelectItem>
+                    <SelectItem value="Asia/Jakarta" className="focus:bg-zinc-900 focus:text-white">Asia/Jakarta (GMT+7)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </div>
         );
+
       case 'personalize':
         return (
-          <div className="space-y-6">
+          <div className="space-y-8 max-w-3xl">
             <div>
               <h3 className="text-lg font-medium text-white">Personalize</h3>
-              <p className="text-sm text-zinc-400">Customize how the assistant behaves and looks.</p>
+              <p className="text-sm text-zinc-400">Customize how the assistant behaves and remembers you.</p>
             </div>
-            <div className="h-px bg-zinc-800" />
-            <div className="text-zinc-500 text-sm italic">Coming soon...</div>
-          </div>
-        );
-      case 'config':
-        return (
-          <div className="space-y-6 max-w-2xl">
-            <div>
-              <h3 className="text-lg font-medium text-white">Model Configuration</h3>
-              <p className="text-sm text-zinc-400">Manage system prompts and external provider keys.</p>
-            </div>
-            <div className="h-px bg-zinc-800" />
             
-            {loading ? (
-              <div className="text-sm text-zinc-500">Loading settings...</div>
-            ) : (
             <div className="space-y-6">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm font-medium text-zinc-300">
-                  <Bot className="h-4 w-4" />
-                  <span>Persona & Instructions</span>
-                </div>
-                <Textarea 
-                  placeholder="You are a helpful assistant..."
-                  className="resize-none h-32 bg-zinc-900 border-zinc-800 focus-visible:ring-1 focus-visible:ring-zinc-700 text-sm placeholder:text-zinc-600"
-                  value={formData.systemPrompt}
-                  onChange={e => setFormData({...formData, systemPrompt: e.target.value})}
+              <div className="space-y-2">
+                <Label className="text-zinc-300">Assistant Nickname</Label>
+                <Input 
+                  value={persNickname}
+                  onChange={(e) => { setPersNickname(e.target.value); handleAutoSave('nickname', e.target.value); }}
+                  placeholder="e.g. JARVIS"
+                  className="bg-zinc-900 border-zinc-800 text-zinc-300 max-w-md"
                 />
               </div>
 
-              <div className="space-y-3 pt-4 border-t border-zinc-800/50">
-                <div className="flex items-center gap-2 text-sm font-medium text-zinc-300">
-                  <Key className="h-4 w-4" />
-                  <span>External Providers (BYOK)</span>
-                </div>
-                <p className="text-[13px] text-zinc-500">
-                  Keys are encrypted at rest and never exposed to the frontend.
-                </p>
-                
-                <div className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-zinc-400">
-                      OpenAI API Key {keyStatus.hasOpenAI && <span className="text-green-500 ml-2">(Set)</span>}
-                    </label>
-                    <Input 
-                      type="password" 
-                      placeholder={keyStatus.hasOpenAI ? "Enter new key to replace..." : "sk-..."}
-                      className="bg-zinc-900 border-zinc-800 focus-visible:ring-1 focus-visible:ring-zinc-700 text-sm placeholder:text-zinc-600 h-10 max-w-md"
-                      value={formData.openAIKey}
-                      onChange={e => setFormData({...formData, openAIKey: e.target.value})}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-xs font-medium text-zinc-400">
-                      Anthropic API Key {keyStatus.hasAnthropic && <span className="text-green-500 ml-2">(Set)</span>}
-                    </label>
-                    <Input 
-                      type="password" 
-                      placeholder={keyStatus.hasAnthropic ? "Enter new key to replace..." : "sk-ant-..."}
-                      className="bg-zinc-900 border-zinc-800 focus-visible:ring-1 focus-visible:ring-zinc-700 text-sm placeholder:text-zinc-600 h-10 max-w-md"
-                      value={formData.anthropicKey}
-                      onChange={e => setFormData({...formData, anthropicKey: e.target.value})}
-                    />
-                  </div>
-                </div>
+              <div className="space-y-2">
+                <Label className="text-zinc-300">Custom System Prompt</Label>
+                <Textarea 
+                  value={persSystemPrompt}
+                  onChange={(e) => { setPersSystemPrompt(e.target.value); handleAutoSave('system_prompt', e.target.value); }}
+                  placeholder="Additional instructions for the AI..."
+                  className="bg-zinc-900 border-zinc-800 text-zinc-300 min-h-[100px]"
+                />
               </div>
 
-              <div className="pt-4 flex justify-start">
+              <div className="grid grid-cols-2 gap-4 max-w-md">
+                <div className="space-y-2">
+                  <Label className="text-zinc-300">Response Style</Label>
+                  <Select value={persStyle} onValueChange={(v) => { setPersStyle(v); handleAutoSave('style', v); }}>
+                    <SelectTrigger className="w-full bg-zinc-900 border-zinc-800 text-zinc-300">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200">
+                      <SelectItem value="concise" className="focus:bg-zinc-900 focus:text-white">Concise</SelectItem>
+                      <SelectItem value="detailed" className="focus:bg-zinc-900 focus:text-white">Detailed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-zinc-300">Reply Language</Label>
+                  <Select value={persReplyLang} onValueChange={(v) => { setPersReplyLang(v); handleAutoSave('reply_lang', v); }}>
+                    <SelectTrigger className="w-full bg-zinc-900 border-zinc-800 text-zinc-300">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200">
+                      <SelectItem value="en" className="focus:bg-zinc-900 focus:text-white">English</SelectItem>
+                      <SelectItem value="id" className="focus:bg-zinc-900 focus:text-white">Bahasa Indonesia</SelectItem>
+                      <SelectItem value="auto" className="focus:bg-zinc-900 focus:text-white">Auto-detect</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-6 border-t border-zinc-800/50">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h4 className="text-base font-medium text-zinc-200">Memory Manager (User Facts)</h4>
+                  <p className="text-xs text-zinc-500">Persistent facts the AI knows about you.</p>
+                </div>
+                <Button size="sm" variant="outline" className="bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:text-white">
+                  <Plus className="h-4 w-4 mr-2" /> Add Fact
+                </Button>
+              </div>
+
+              <div className="border border-zinc-800 rounded-md overflow-hidden">
+                <Table>
+                  <TableHeader className="bg-zinc-900/50">
+                    <TableRow className="border-zinc-800 hover:bg-transparent">
+                      <TableHead className="text-zinc-400 font-medium">Fact</TableHead>
+                      <TableHead className="text-zinc-400 font-medium w-32">Source</TableHead>
+                      <TableHead className="text-zinc-400 font-medium w-32">Date</TableHead>
+                      <TableHead className="text-right text-zinc-400 font-medium w-24">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {/* TODO: connect to /api/settings/memory */}
+                    {memoryFacts.map((fact) => (
+                      <TableRow key={fact.id} className="border-zinc-800/50 hover:bg-zinc-900/30">
+                        <TableCell className="text-zinc-300">{fact.fact}</TableCell>
+                        <TableCell className="text-zinc-500 text-xs">
+                          <span className="cursor-pointer hover:underline hover:text-zinc-300">{fact.source}</span>
+                        </TableCell>
+                        <TableCell className="text-zinc-500 text-xs">{fact.date}</TableCell>
+                        <TableCell className="text-right">
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-500 hover:text-red-400 hover:bg-red-500/10">
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent className="bg-zinc-950 border-white/10 text-white">
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete memory fact?</AlertDialogTitle>
+                                <AlertDialogDescription className="text-zinc-400">
+                                  This will remove this fact from the assistant's context permanently.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel className="bg-zinc-900 border-zinc-800 hover:bg-zinc-800 hover:text-white">Cancel</AlertDialogCancel>
+                                <AlertDialogAction className="bg-red-500 text-white hover:bg-red-600">Delete</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'models':
+        return (
+          <div className="space-y-8 max-w-2xl">
+            <div>
+              <h3 className="text-lg font-medium text-white flex items-center gap-2">
+                Models Configuration
+                {modelChanged && <span className="text-[10px] uppercase font-bold bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full ml-2 tracking-wider">Restart Required</span>}
+              </h3>
+              <p className="text-sm text-zinc-400">Configure local Ollama models for different roles.</p>
+            </div>
+
+            <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 flex flex-col gap-2">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Live Resource Usage</span>
+                <span className="text-xs text-zinc-300 font-mono">3.1 GB / 4.0 GB VRAM</span>
+              </div>
+              <div className="h-2 w-full bg-zinc-950 rounded-full overflow-hidden">
+                <div className="h-full bg-emerald-400 w-[77%]"></div>
+              </div>
+              {/* TODO: connect to /api/system/resources */}
+            </div>
+            
+            <div className="space-y-6">
+              {[
+                { label: 'Planner Model', val: plannerModel, setter: setPlannerModel, key: 'planner', think: thinkMode.planner },
+                { label: 'Executor Model', val: executorModel, setter: setExecutorModel, key: 'executor', think: thinkMode.executor },
+                { label: 'Diagnostician Model', val: diagModel, setter: setDiagModel, key: 'diag', think: thinkMode.diag }
+              ].map((item) => (
+                <div key={item.key} className="space-y-2 p-4 border border-zinc-800/50 rounded-lg bg-zinc-900/20">
+                  <div className="flex justify-between items-start mb-2">
+                    <Label className="text-zinc-200">{item.label}</Label>
+                    <div className="flex items-center space-x-2">
+                      <Switch 
+                        checked={item.think} 
+                        onCheckedChange={(v) => {
+                          setThinkMode({...thinkMode, [item.key]: v});
+                          setModelChanged(true);
+                        }} 
+                        className="data-[state=checked]:bg-emerald-500"
+                      />
+                      <Label className="text-xs text-zinc-400">Think Mode</Label>
+                    </div>
+                  </div>
+                  <Select value={item.val} onValueChange={(v) => { item.setter(v); setModelChanged(true); }}>
+                    <SelectTrigger className="w-full bg-zinc-900 border-zinc-800 text-zinc-300">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200">
+                      <SelectItem value="qwen3:4b" className="focus:bg-zinc-900 focus:text-white">qwen3:4b (Local)</SelectItem>
+                      <SelectItem value="llama3:8b" className="focus:bg-zinc-900 focus:text-white">llama3:8b (Local)</SelectItem>
+                      {/* TODO: populate from /api/system/models */}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
+
+              <div className="space-y-4 pt-2">
+                <div className="flex justify-between items-center">
+                  <Label className="text-zinc-300">Keep Alive Duration: {keepAlive[0]}m</Label>
+                </div>
+                <Slider 
+                  value={keepAlive} 
+                  onValueChange={(v) => { setKeepAlive(v); setModelChanged(true); }}
+                  max={60} 
+                  step={5}
+                  className="py-2"
+                />
+                <p className="text-xs text-zinc-500">Longer keep alive consumes VRAM constantly but prevents cold-start delays.</p>
+              </div>
+
+              <Accordion type="single" collapsible className="w-full">
+                <AccordionItem value="advanced" className="border-zinc-800">
+                  <AccordionTrigger className="text-sm font-medium text-zinc-300 hover:text-white hover:no-underline">
+                    Advanced Settings
+                  </AccordionTrigger>
+                  <AccordionContent className="text-zinc-400 space-y-4 pt-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Temperature</Label>
+                        <Input type="number" defaultValue="0.7" step="0.1" className="bg-zinc-900 border-zinc-800" onChange={() => setModelChanged(true)} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Top P</Label>
+                        <Input type="number" defaultValue="0.9" step="0.1" className="bg-zinc-900 border-zinc-800" onChange={() => setModelChanged(true)} />
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+
+              <div className="pt-6 border-t border-zinc-800/50">
                 <Button 
-                  onClick={handleSaveConfig} 
-                  disabled={saving} 
-                  className="bg-white text-black hover:bg-zinc-200"
+                  disabled={!modelChanged || modelSaving}
+                  onClick={() => { setModelSaving(true); setTimeout(() => { setModelSaving(false); setModelChanged(false); }, 1000); }}
+                  className="bg-white text-black hover:bg-zinc-200 disabled:bg-zinc-800 disabled:text-zinc-500"
                 >
-                  {saving ? "Saving..." : "Save Configuration"}
+                  {modelSaving ? "Applying..." : "Apply Changes"}
                 </Button>
               </div>
             </div>
-            )}
           </div>
         );
-      case 'storage':
+
+      case 'connections':
         return (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-medium text-white">Storage Management</h3>
-                <p className="text-sm text-zinc-400">Manage files uploaded across all platforms (Web, Telegram, WhatsApp).</p>
-              </div>
-              <Button 
-                variant="destructive" 
-                size="sm" 
-                className="bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-300 border border-red-500/20"
-                onClick={handlePurgeUploads}
-                disabled={uploads.length === 0}
-              >
-                Purge All
-              </Button>
+          <div className="space-y-8 max-w-3xl">
+            <div>
+              <h3 className="text-lg font-medium text-white">Integrations & Connections</h3>
+              <p className="text-sm text-zinc-400">Manage external platforms and active web sessions.</p>
             </div>
-            <div className="h-px bg-zinc-800" />
-            
-            <div className="border border-zinc-800 rounded-lg overflow-hidden bg-zinc-900/30">
-              <div className="grid grid-cols-12 gap-4 p-4 border-b border-zinc-800 text-xs font-medium text-zinc-400 bg-zinc-900/50">
-                <div className="col-span-5">Filename</div>
-                <div className="col-span-2">Status</div>
-                <div className="col-span-2">Size</div>
-                <div className="col-span-2">Date</div>
-                <div className="col-span-1 text-right">Action</div>
-              </div>
-              <div className="divide-y divide-zinc-800/50">
-                {loadingUploads ? (
-                  <div className="p-4 text-center text-sm text-zinc-500">Loading uploads...</div>
-                ) : uploads.length === 0 ? (
-                  <div className="p-4 text-center text-sm text-zinc-500">No files found.</div>
-                ) : (
-                  uploads.map((job) => (
-                    <div key={job.id} className="grid grid-cols-12 gap-4 p-4 items-center text-sm text-zinc-300 hover:bg-zinc-800/30 transition-colors">
-                      <div className="col-span-5 flex items-center gap-2 truncate">
-                        <FileText className="h-4 w-4 text-zinc-500 shrink-0" />
-                        <span className="truncate" title={job.file_name}>{job.file_name}</span>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* WhatsApp Card */}
+              <div className="flex flex-col border border-zinc-800/80 rounded-xl bg-[#09090b] overflow-hidden">
+                <div className="p-5 flex-1">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-lg bg-[#25D366]/10 flex items-center justify-center border border-[#25D366]/20">
+                        <Smartphone className="h-5 w-5 text-[#25D366]" />
                       </div>
-                      <div className="col-span-2 flex items-center gap-1.5">
-                        <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                          job.status === 'completed' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
-                          job.status === 'failed' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                          'bg-blue-500/10 text-blue-400 border-blue-500/20'
-                        }`}>
-                          {job.status}
-                        </span>
-                      </div>
-                      <div className="col-span-2 text-zinc-500">
-                        {(job.file_size / (1024 * 1024)).toFixed(2)} MB
-                      </div>
-                      <div className="col-span-2 text-zinc-500">
-                        {new Date(job.created_at).toLocaleDateString()}
-                      </div>
-                      <div className="col-span-1 flex justify-end">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-zinc-500 hover:text-red-400 hover:bg-red-500/10"
-                          onClick={() => handleDeleteUpload(job.id)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                      <div>
+                        <h4 className="font-medium text-zinc-200">WhatsApp</h4>
+                        <div className="text-xs text-zinc-500 mt-0.5">Local Gateway</div>
                       </div>
                     </div>
-                  ))
-                )}
+                    
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-emerald-500/10 border border-emerald-500/20">
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                      </span>
+                      <span className="text-[10px] font-medium text-emerald-400 uppercase tracking-wider">Connected</span>
+                    </div>
+                  </div>
+                  
+                  <p className="text-sm text-zinc-400">
+                    Currently linked to <span className="text-zinc-200 font-medium">+62 812-****-4567</span>.
+                  </p>
+                </div>
+                
+                <div className="border-t border-zinc-800/80 p-3 bg-zinc-900/30 flex gap-2">
+                  <Button variant="ghost" size="sm" className="flex-1 bg-zinc-800/50 hover:bg-zinc-800 text-zinc-300 h-8 text-xs">
+                    Relink Device
+                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="ghost" size="sm" className="flex-1 bg-transparent hover:bg-red-500/10 text-zinc-400 hover:text-red-400 h-8 text-xs">
+                        Disconnect
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="bg-zinc-950 border-white/10 text-white">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Disconnect WhatsApp?</AlertDialogTitle>
+                        <AlertDialogDescription className="text-zinc-400">
+                          This will immediately terminate the WhatsApp session. You will need to scan a QR code to reconnect.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel className="bg-zinc-900 border-zinc-800 hover:bg-zinc-800 hover:text-white">Cancel</AlertDialogCancel>
+                        <AlertDialogAction className="bg-red-500 text-white hover:bg-red-600">Disconnect</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
+              </div>
+
+              {/* Telegram Card */}
+              <div className="flex flex-col border border-zinc-800/80 rounded-xl bg-[#09090b] overflow-hidden">
+                <div className="p-5 flex-1 flex flex-col">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-lg bg-[#0088cc]/10 flex items-center justify-center border border-[#0088cc]/20">
+                        <LinkIcon className="h-5 w-5 text-[#0088cc]" />
+                      </div>
+                      <div>
+                        <h4 className="font-medium text-zinc-200">Telegram</h4>
+                        <div className="text-xs text-zinc-500 mt-0.5">Bot API</div>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-zinc-800/50 border border-zinc-700/50">
+                      <span className="relative flex h-1.5 w-1.5">
+                        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-zinc-500"></span>
+                      </span>
+                      <span className="text-[10px] font-medium text-zinc-400 uppercase tracking-wider">Offline</span>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-auto space-y-2">
+                    <Label className="text-xs text-zinc-500">Bot Token</Label>
+                    <Input type="password" placeholder="e.g. 123456789:ABCdefGHIjkl..." className="bg-zinc-950 border-zinc-800 text-xs h-9 focus-visible:ring-1 focus-visible:ring-zinc-700 placeholder:text-zinc-700" />
+                  </div>
+                </div>
+                
+                <div className="border-t border-zinc-800/80 p-3 bg-zinc-900/30 flex">
+                  <Button variant="ghost" size="sm" className="w-full bg-zinc-800/50 hover:bg-zinc-800 text-zinc-300 h-8 text-xs">
+                    Test & Connect
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-6">
+              <div className="mb-4">
+                <h4 className="text-base font-medium text-zinc-200">Active Web Sessions</h4>
+                <p className="text-xs text-zinc-500">Other devices currently logged in to your account.</p>
+              </div>
+              <div className="grid grid-cols-1 gap-3">
+                <div className="flex items-center justify-between p-4 border border-zinc-800/80 rounded-xl bg-zinc-900/20">
+                  <div className="flex items-center gap-4">
+                    <div className="h-10 w-10 rounded-full bg-zinc-800 flex items-center justify-center shrink-0">
+                      <Globe className="h-5 w-5 text-zinc-400" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-zinc-200 flex items-center gap-2">
+                        Chrome on Linux
+                        <span className="text-[10px] uppercase font-bold bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded tracking-wider">Current</span>
+                      </div>
+                      <div className="text-xs text-zinc-500 mt-0.5">Jakarta, ID • Active now</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between p-4 border border-zinc-800/80 rounded-xl bg-zinc-900/20 group">
+                  <div className="flex items-center gap-4">
+                    <div className="h-10 w-10 rounded-full bg-zinc-800 flex items-center justify-center shrink-0">
+                      <Smartphone className="h-5 w-5 text-zinc-400" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-zinc-200">
+                        Safari on iPhone
+                      </div>
+                      <div className="text-xs text-zinc-500 mt-0.5">Unknown Location • Last active 2 hours ago</div>
+                    </div>
+                  </div>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="ghost" size="sm" className="text-zinc-500 hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity">
+                        Revoke
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="bg-zinc-950 border-white/10 text-white">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Revoke session?</AlertDialogTitle>
+                        <AlertDialogDescription className="text-zinc-400">
+                          This will log out Safari on iPhone immediately.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel className="bg-zinc-900 border-zinc-800 hover:bg-zinc-800 hover:text-white">Cancel</AlertDialogCancel>
+                        <AlertDialogAction className="bg-red-500 text-white hover:bg-red-600">Revoke</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
               </div>
             </div>
           </div>
         );
+
+      case 'storage':
+        return (
+          <div className="space-y-12 max-w-4xl">
+            {/* Section A: Vector DB */}
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-medium text-white">Vector DB (Qdrant)</h3>
+                <p className="text-sm text-zinc-400">Manage semantic memory and document embeddings.</p>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="border border-zinc-800 rounded-xl p-5 bg-zinc-900/30">
+                  <h4 className="text-zinc-400 text-sm font-medium mb-1">Collection: documents</h4>
+                  <div className="text-3xl font-light text-white mb-4">1,248 <span className="text-base text-zinc-500 font-normal">vectors</span></div>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className="bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:text-white w-full">Reindex</Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button size="sm" variant="outline" className="bg-zinc-900 border-zinc-800 text-red-400 hover:bg-red-500/10 hover:border-red-500/20 w-full">Clear</Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent className="bg-zinc-950 border-white/10 text-white">
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Clear Collection?</AlertDialogTitle>
+                          <AlertDialogDescription className="text-zinc-400">
+                            This deletes all embedded document vectors. Document files won't be deleted but will need reindexing.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel className="bg-zinc-900 border-zinc-800">Cancel</AlertDialogCancel>
+                          <AlertDialogAction className="bg-red-500 text-white hover:bg-red-600">Clear Data</AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
+
+                <div className="border border-zinc-800 rounded-xl p-5 bg-zinc-900/30">
+                  <h4 className="text-zinc-400 text-sm font-medium mb-1">Collection: user_facts</h4>
+                  <div className="text-3xl font-light text-white mb-4">42 <span className="text-base text-zinc-500 font-normal">vectors</span></div>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" className="bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:text-white w-full">Reindex</Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button size="sm" variant="outline" className="bg-zinc-900 border-zinc-800 text-red-400 hover:bg-red-500/10 hover:border-red-500/20 w-full">Clear</Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent className="bg-zinc-950 border-white/10 text-white">
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Clear Collection?</AlertDialogTitle>
+                          <AlertDialogDescription className="text-zinc-400">
+                            This deletes all AI-learned facts about you.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel className="bg-zinc-900 border-zinc-800">Cancel</AlertDialogCancel>
+                          <AlertDialogAction className="bg-red-500 text-white hover:bg-red-600">Clear Data</AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Section B: Document Library */}
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-medium text-white">Document Library</h3>
+                  <p className="text-sm text-zinc-400">Manage uploaded files and their indexing status.</p>
+                </div>
+              </div>
+              <div className="border border-zinc-800 rounded-lg overflow-hidden">
+                <div className="p-3 bg-zinc-900/50 border-b border-zinc-800">
+                  <Input placeholder="Search documents..." className="h-8 text-xs bg-zinc-900 border-zinc-700 w-64" />
+                </div>
+                <Table>
+                  <TableHeader className="bg-zinc-900/30">
+                    <TableRow className="border-zinc-800">
+                      <TableHead className="text-zinc-400">File Name</TableHead>
+                      <TableHead className="text-zinc-400">Date</TableHead>
+                      <TableHead className="text-zinc-400">Chunks</TableHead>
+                      <TableHead className="text-zinc-400">Source</TableHead>
+                      <TableHead className="text-right text-zinc-400">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {/* TODO: connect to real API */}
+                    <TableRow className="border-zinc-800/50">
+                      <TableCell className="text-zinc-300 font-medium flex items-center gap-2">
+                        <FileText className="h-4 w-4 text-zinc-500" /> report-2024.pdf
+                      </TableCell>
+                      <TableCell className="text-zinc-500 text-xs">2026-08-20</TableCell>
+                      <TableCell className="text-zinc-500 text-xs">45</TableCell>
+                      <TableCell className="text-zinc-500 text-xs underline cursor-pointer hover:text-zinc-300">Thread 12</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="sm" className="h-7 text-xs text-zinc-400 hover:text-white mr-1">Reindex</Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-7 w-7 text-zinc-500 hover:text-red-400 hover:bg-red-500/10">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent className="bg-zinc-950 border-white/10 text-white">
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete document?</AlertDialogTitle>
+                              <AlertDialogDescription className="text-zinc-400">
+                                This will remove the file from storage and its vectors from Qdrant.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel className="bg-zinc-900 border-zinc-800">Cancel</AlertDialogCancel>
+                              <AlertDialogAction className="bg-red-500 text-white">Delete</AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+
+            {/* Section C: Threads DB */}
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-lg font-medium text-white">Threads Database (SQLite)</h3>
+                <p className="text-sm text-zinc-400">Manage chat history storage.</p>
+              </div>
+              <div className="flex items-center gap-4 bg-zinc-900/30 p-4 border border-zinc-800 rounded-xl">
+                <Database className="h-8 w-8 text-zinc-500" />
+                <div className="flex-1">
+                  <div className="text-zinc-200 font-medium">pribadi.db</div>
+                  <div className="text-xs text-zinc-500">Size: 14.2 MB • WAL Mode: Enabled</div>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:text-white">
+                    Export Backup
+                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="outline" size="sm" className="bg-zinc-900 border-zinc-800 text-red-400 hover:bg-red-500/10 hover:border-red-500/20">
+                        Bulk Delete Old
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent className="bg-zinc-950 border-white/10 text-white">
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Bulk Delete Threads</AlertDialogTitle>
+                        <AlertDialogDescription className="text-zinc-400">
+                          Delete threads older than 30 days?
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel className="bg-zinc-900 border-zinc-800">Cancel</AlertDialogCancel>
+                        <AlertDialogAction className="bg-red-500 text-white">Delete</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </div>
+              </div>
+            </div>
+
+            {/* Section D: Danger Zone */}
+            <div className="space-y-6 pt-12 mt-12 border-t border-red-500/20">
+              <div>
+                <h3 className="text-lg font-medium text-red-400">Danger Zone</h3>
+                <p className="text-sm text-zinc-500">Irreversible actions.</p>
+              </div>
+              <div className="flex items-center justify-between p-4 border border-red-500/20 rounded-xl bg-red-500/5">
+                <div>
+                  <div className="font-medium text-zinc-200">Delete all data</div>
+                  <div className="text-xs text-zinc-500 mt-1">This will permanently delete your account, all threads, vectors, and uploaded files.</div>
+                </div>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" className="bg-red-500 hover:bg-red-600 text-white font-medium shadow-none">
+                      Delete Everything
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent className="bg-zinc-950 border-red-500/30 text-white">
+                    <AlertDialogHeader>
+                      <AlertDialogTitle className="text-red-400">Are you absolutely sure?</AlertDialogTitle>
+                      <AlertDialogDescription className="text-zinc-400">
+                        This action cannot be undone. This will permanently delete your
+                        account and remove your data from our servers.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel className="bg-zinc-900 border-zinc-800">Cancel</AlertDialogCancel>
+                      <AlertDialogAction className="bg-red-500 text-white hover:bg-red-600 font-bold">Yes, delete my account</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            </div>
+          </div>
+        );
+
       default:
         return null;
     }
   };
 
   return (
-    <div className="flex h-screen bg-black">
+    <div className="flex h-screen bg-black text-white selection:bg-white/20 overflow-hidden">
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 flex items-center px-6 border-b border-zinc-800/50 bg-[#09090b]">
+        <header className="h-16 flex items-center px-8 border-b border-white/[0.02] bg-transparent">
           <h1 className="text-lg font-semibold text-white">Settings</h1>
         </header>
         
         <div className="flex-1 flex overflow-hidden">
           {/* Settings Nav */}
-          <div className="w-64 border-r border-zinc-800/50 bg-zinc-950/50 p-4 flex flex-col gap-1 overflow-y-auto">
-            <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2 px-2">Account</div>
+          <div className="w-64 border-r border-white/[0.02] p-6 flex flex-col gap-1 overflow-y-auto">
+            <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3 mt-2 px-2">Account</div>
             
             <button
               onClick={() => setActiveTab('preferences')}
-              className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                 activeTab === 'preferences' 
-                  ? 'bg-zinc-800 text-white font-medium' 
+                  ? 'bg-zinc-800/80 text-white font-medium shadow-sm' 
                   : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
               }`}
             >
@@ -331,9 +778,9 @@ export default function SettingsPage() {
             
             <button
               onClick={() => setActiveTab('personalize')}
-              className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                 activeTab === 'personalize' 
-                  ? 'bg-zinc-800 text-white font-medium' 
+                  ? 'bg-zinc-800/80 text-white font-medium shadow-sm' 
                   : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
               }`}
             >
@@ -341,25 +788,41 @@ export default function SettingsPage() {
               Personalize
             </button>
 
-            <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2 mt-6 px-2">System</div>
+            <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3 mt-8 px-2">System</div>
             
             <button
-              onClick={() => setActiveTab('config')}
-              className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
-                activeTab === 'config' 
-                  ? 'bg-zinc-800 text-white font-medium' 
+              onClick={() => setActiveTab('models')}
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                activeTab === 'models' 
+                  ? 'bg-zinc-800/80 text-white font-medium shadow-sm' 
                   : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
               }`}
             >
-              <Settings className="h-4 w-4" />
-              Configuration
+              <Cpu className="h-4 w-4" />
+              Models
             </button>
+            
+            <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3 mt-8 px-2">Integrations</div>
+
+            <button
+              onClick={() => setActiveTab('connections')}
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                activeTab === 'connections' 
+                  ? 'bg-zinc-800/80 text-white font-medium shadow-sm' 
+                  : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+              }`}
+            >
+              <LinkIcon className="h-4 w-4" />
+              Connections
+            </button>
+
+            <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3 mt-8 px-2">Data & Privacy</div>
             
             <button
               onClick={() => setActiveTab('storage')}
-              className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                 activeTab === 'storage' 
-                  ? 'bg-zinc-800 text-white font-medium' 
+                  ? 'bg-zinc-800/80 text-white font-medium shadow-sm' 
                   : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
               }`}
             >
@@ -367,10 +830,10 @@ export default function SettingsPage() {
               Storage
             </button>
 
-            <div className="mt-auto pt-4 border-t border-zinc-800/50">
+            <div className="mt-auto pt-6">
               <button
                 onClick={handleLogout}
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
+                className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:bg-red-500/10 hover:text-red-400 transition-colors"
               >
                 <LogOut className="h-4 w-4" />
                 Logout
@@ -379,10 +842,8 @@ export default function SettingsPage() {
           </div>
           
           {/* Content Area */}
-          <div className="flex-1 overflow-y-auto bg-black p-8">
-            <div className="max-w-4xl mx-auto">
-              {renderTabContent()}
-            </div>
+          <div className="flex-1 overflow-y-auto px-8 md:px-12 py-10">
+            {renderTabContent()}
           </div>
         </div>
       </div>
