@@ -86,8 +86,8 @@ export const useChatStore = create<ChatState>((set) => ({
     if (!lastMsg || lastMsg.role !== 'assistant') return state;
     
     const updatedMessages = [...state.messages];
-    
     const updatedMsg = { ...lastMsg };
+    console.log('updated messages', updatedMsg);
     if (chunk) {
       updatedMsg.content = lastMsg.content + chunk;
     }
@@ -96,7 +96,8 @@ export const useChatStore = create<ChatState>((set) => ({
     }
 
     updatedMessages[updatedMessages.length - 1] = updatedMsg;
-    
+
+    console.log('final updated messages', updatedMessages)
     return { messages: updatedMessages };
   }),
 

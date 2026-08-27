@@ -341,14 +341,19 @@ export function ChatArea() {
               if (dataStr && dataStr !== "null") {
                 const data = JSON.parse(dataStr);
                 if (eventType === "token" && data.content) {
+                  console.log("event type token")
                   appendStreamChunk(data.content, undefined);
                 } else if (eventType === "tool" && Array.isArray(data)) {
+                  console.log('event type tool')
                   appendStreamChunk("", data);
                 } else if (eventType === "thinking" && data.content) {
+                  console.log('event type thingking')
                   appendThinking(data.content);
                 } else if (eventType === "stage") {
+                  console.log('event type stage')
                   addStageToLastMessage(data);
                 } else if (eventType === "interrupted") {
+                  console.log('event type interrupted');
                   markLastMessageInterrupted();
                 }
               }

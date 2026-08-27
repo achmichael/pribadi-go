@@ -96,9 +96,9 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 				sendSSEEvent(w, flusher, "token", map[string]string{"content": chunk.Text})
 
 			case orchestrator.ChunkDone:
-				if chunk.Text != "" {
-					sendSSEEvent(w, flusher, "token", map[string]string{"content": chunk.Text})
-				}
+				// if chunk.Text != "" {
+				// 	sendSSEEvent(w, flusher, "token", map[string]string{"content": chunk.Text})
+				// }
 				sendSSEEvent(w, flusher, "done", nil)
 
 				s.saveAssistantMessage(context.Background(), normalized.SessionID, chunk.Text, req.Model)
