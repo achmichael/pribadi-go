@@ -43,8 +43,22 @@ type DocMeta struct {
 	Advisor         string `json:"advisor"`
 }
 
+type RouteDecision struct {
+	Intent     string
+	Confidence float32
+}
+
+type RetrievalStrategy int
+
+const (
+	StrategySkipAll RetrievalStrategy = iota
+	StrategyAgentic
+	StrategyPrefetch
+)
+
 const maxContextChars = 15000
 const maxToolIterations = 3
+const highConfidenceThreshold = 0.90
 
 type coreOrchestrator struct {
 	ragIngest     rag.IngestionService
@@ -195,6 +209,36 @@ func cosineSimilarity(a, b []float32) float32 {
 	return float32(dot / denom)
 }
 
+func isDefinitelyNoRetrievalIntent(intent string) bool {
+	noRetrievalIntents := map[string]bool{
+		"greeting":  true,
+		"thanks":    true,
+		"chitchat": true,
+	}
+	return noRetrievalIntents[intent]
+}
+
+func isDefinitelyNeedsRetrievalIntent(intent string) bool {
+	needsRetrievalIntents := map[string]bool{
+		"ask_document":    true,
+		"document_query":  true,
+	}
+	return needsRetrievalIntents[intent]
+}
+
+func confidenceStringToFloat(confidence string) float32 {
+	switch confidence {
+	case "high":
+		return 0.95
+	case "medium":
+		return 0.65
+	case "low":
+		return 0.35
+	default:
+		return 0.5
+	}
+}
+
 func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInboundMessage, out OutboundAdapter) error {
 	handleStart := time.Now()
 	o.logger.Info().
@@ -271,9 +315,42 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		}
 	}
 
+	decision := RouteDecision{
+		Intent:     routedIntent,
+		Confidence: 0.65,
+	}
+	if classResult != nil && classResult.Confidence != "" {
+		decision.Confidence = confidenceStringToFloat(classResult.Confidence)
+	}
+
+	strategy := o.decideRetrievalStrategy(decision, targetDocID)
+
+	o.logger.Info().
+		Str("intent", decision.Intent).
+		Float32("confidence", decision.Confidence).
+		Str("strategy", strategyName(strategy)).
+		Msg("[orchestrator] retrieval strategy decided")
+
 	contextStart := time.Now()
-	skipRAG := routedIntent == "chitchat" || routedIntent == "greeting" || routedIntent == "thanks"
-	skipMemory := routedIntent == "greeting" || routedIntent == "thanks"
+	var skipRAG, skipMemory bool
+	var toolSchemas []ollama.Tool
+
+	switch strategy {
+	case StrategySkipAll:
+		skipRAG = true
+		skipMemory = true
+		toolSchemas = nil
+
+	case StrategyAgentic:
+		skipRAG = true
+		skipMemory = true
+		toolSchemas = o.ollama.Schemas()
+
+	case StrategyPrefetch:
+		skipRAG = false
+		skipMemory = false
+		toolSchemas = o.ollama.Schemas()
+	}
 
 	out.Deliver(ctx, msg.SessionID, ResponseChunk{
 		Type:  ChunkStageEvent,
@@ -337,7 +414,7 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		Stage: "generating",
 	})
 
-	streamCh, streamErr := o.ollama.ChatStream(ctx, messages, o.ollama.Schemas())
+	streamCh, streamErr := o.ollama.ChatStream(ctx, messages, toolSchemas)
 	var rawResponse string
 
 	if streamErr != nil {
@@ -594,7 +671,7 @@ func (o *coreOrchestrator) executeToolCall(ctx context.Context, tc ollama.ToolCa
 		}
 		return result
 
-	case "search_memory":
+	case "recall_memory", "search_memory":
 		query := ""
 		if q, ok := tc.Function.Arguments["query"].(string); ok {
 			query = q
@@ -920,6 +997,35 @@ func (o *coreOrchestrator) shouldResolveReferences(userText string) bool {
 		}
 	}
 	return false
+}
+
+func (o *coreOrchestrator) decideRetrievalStrategy(decision RouteDecision, targetDocID string) RetrievalStrategy {
+	if targetDocID != "" {
+		return StrategyPrefetch
+	}
+
+	if decision.Confidence >= highConfidenceThreshold && isDefinitelyNoRetrievalIntent(decision.Intent) {
+		return StrategySkipAll
+	}
+
+	if decision.Confidence >= highConfidenceThreshold && isDefinitelyNeedsRetrievalIntent(decision.Intent) {
+		return StrategyPrefetch
+	}
+
+	return StrategyAgentic
+}
+
+func strategyName(s RetrievalStrategy) string {
+	switch s {
+	case StrategySkipAll:
+		return "fast_path_skip"
+	case StrategyAgentic:
+		return "agentic_decision"
+	case StrategyPrefetch:
+		return "fast_path_retrieve"
+	default:
+		return "unknown"
+	}
 }
 
 func (o *coreOrchestrator) resolveReferences(ctx context.Context, userID, userText, sessionID string) (string, string) {

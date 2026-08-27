@@ -17,7 +17,7 @@ func (r *Registry) Schemas() []ollama.Tool {
 			Type: "function",
 			Function: ollama.Function{
 				Name:        "search_documents",
-				Description: "Search uploaded documents (RAG) for relevant information. Use when user asks about uploaded files, papers, or documents.",
+				Description: "Search uploaded documents for relevant information. Call ONLY if the question requires referencing specific document content that was previously uploaded by the user. Do NOT call for casual chat, general knowledge questions, greetings, or thanks.",
 				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
@@ -33,8 +33,8 @@ func (r *Registry) Schemas() []ollama.Tool {
 		{
 			Type: "function",
 			Function: ollama.Function{
-				Name:        "search_memory",
-				Description: "Search personal facts and memories about the user. Use when user asks about their own information (name, preferences, past conversations).",
+				Name:        "recall_memory",
+				Description: "Retrieve stored personal facts and preferences about the user. Call ONLY if the question asks about user-specific information (their name, preferences, past facts they told you) that you don't already have in context. Do NOT call for greetings, thanks, or general conversation.",
 				Parameters: map[string]interface{}{
 					"type": "object",
 					"properties": map[string]interface{}{
