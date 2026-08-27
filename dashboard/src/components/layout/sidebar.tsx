@@ -313,7 +313,7 @@ export function Sidebar() {
 
   return (
     <div 
-      className="border-r border-zinc-800/50 bg-[#09090b] flex flex-col h-full shrink-0 relative z-20 group/sidebar transition-all duration-300 ease-in-out"
+      className="border-r border-zinc-800/50 bg-[#09090b] flex flex-col h-full pt-5 shrink-0 relative z-20 group/sidebar transition-all duration-300 ease-in-out overflow-y-auto"
       style={{ width: `${width}px` }}
     >
       {/* Resizer Handle */}
