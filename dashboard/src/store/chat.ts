@@ -87,8 +87,12 @@ export const useChatStore = create<ChatState>((set) => ({
     
     const updatedMessages = [...state.messages];
     const updatedMsg = { ...lastMsg };
-    console.log('updated messages', updatedMsg);
+    
     if (chunk) {
+      const currentContent = lastMsg.content;
+      if (currentContent && chunk === currentContent) {
+        return state;
+      }
       updatedMsg.content = lastMsg.content + chunk;
     }
     if (toolCalls && toolCalls.length > 0) {
@@ -97,7 +101,6 @@ export const useChatStore = create<ChatState>((set) => ({
 
     updatedMessages[updatedMessages.length - 1] = updatedMsg;
 
-    console.log('final updated messages', updatedMessages)
     return { messages: updatedMessages };
   }),
 
