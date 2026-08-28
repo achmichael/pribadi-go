@@ -122,6 +122,7 @@ type MessageV2 struct {
 	Role          string
 	Content       string
 	TokenCount    int
+	Metadata      string
 	CreatedAt     time.Time
 }
 
@@ -133,6 +134,7 @@ type InsertMessageV2Params struct {
 	Role          string
 	Content       string
 	TokenCount    int
+	Metadata      string
 }
 
 type UserFact struct {
@@ -491,10 +493,15 @@ func (r *sqliteRepo) GetUserIDByPlatform(ctx context.Context, platform, platform
 // ═══════════════════════════════════════════════════════════════════
 
 func (r *sqliteRepo) InsertMessageV2(ctx context.Context, arg InsertMessageV2Params) (MessageV2, error) {
+	metadata := arg.Metadata
+	if metadata == "" {
+		metadata = "{}"
+	}
+	
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO messages_v2 (user_id, platform, platform_msg_id, session_id, role, content, token_count)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		arg.UserID, arg.Platform, arg.PlatformMsgID, arg.SessionID, arg.Role, arg.Content, arg.TokenCount,
+		`INSERT INTO messages_v2 (user_id, platform, platform_msg_id, session_id, role, content, token_count, metadata)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		arg.UserID, arg.Platform, arg.PlatformMsgID, arg.SessionID, arg.Role, arg.Content, arg.TokenCount, metadata,
 	)
 	if err != nil {
 		return MessageV2{}, err
@@ -515,9 +522,9 @@ func (r *sqliteRepo) InsertMessageV2(ctx context.Context, arg InsertMessageV2Par
 
 func (r *sqliteRepo) ListMessagesByUserSession(ctx context.Context, userID, sessionID string, limit int) ([]MessageV2, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, user_id, platform, platform_msg_id, session_id, role, content, token_count, created_at
+		`SELECT id, user_id, platform, platform_msg_id, session_id, role, content, token_count, COALESCE(metadata, '{}'), created_at
 		 FROM (
-			 SELECT id, user_id, platform, platform_msg_id, session_id, role, content, token_count, created_at
+			 SELECT id, user_id, platform, platform_msg_id, session_id, role, content, token_count, metadata, created_at
 			 FROM messages_v2
 			 WHERE user_id = ? AND session_id = ?
 			 ORDER BY created_at DESC
@@ -537,9 +544,9 @@ func (r *sqliteRepo) ListMessagesByUserSession(ctx context.Context, userID, sess
 // Query follows FTS5 query syntax (e.g. "golang AND project").
 func (r *sqliteRepo) SearchMessagesFTS(ctx context.Context, userID, query string, limit int) ([]MessageV2, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT m.id, m.user_id, m.platform, m.platform_msg_id, m.session_id, m.role, m.content, m.token_count, m.created_at
-		 FROM messages_fts f
-		 JOIN messages_v2 m ON m.id = f.rowid
+		`SELECT m.id, m.user_id, m.platform, m.platform_msg_id, m.session_id, m.role, m.content, m.token_count, COALESCE(m.metadata, '{}'), m.created_at
+		 FROM messages_v2 m
+		 INNER JOIN messages_fts f ON f.rowid = m.id
 		 WHERE f.messages_fts MATCH ?
 		   AND m.user_id = ?
 		 ORDER BY rank
@@ -557,7 +564,7 @@ func (r *sqliteRepo) SearchMessagesFTS(ctx context.Context, userID, query string
 // Good for partial matches, CJK, and mixed Indonesian-English terms.
 func (r *sqliteRepo) SearchMessagesTrigram(ctx context.Context, userID, query string, limit int) ([]MessageV2, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT m.id, m.user_id, m.platform, m.platform_msg_id, m.session_id, m.role, m.content, m.token_count, m.created_at
+		`SELECT m.id, m.user_id, m.platform, m.platform_msg_id, m.session_id, m.role, m.content, m.token_count, COALESCE(m.metadata, '{}'), m.created_at
 		 FROM messages_fts_trigram f
 		 JOIN messages_v2 m ON m.id = f.rowid
 		 WHERE f.messages_fts_trigram MATCH ?
@@ -579,7 +586,7 @@ func scanMessagesV2(rows *sql.Rows) ([]MessageV2, error) {
 		var m MessageV2
 		if err := rows.Scan(
 			&m.ID, &m.UserID, &m.Platform, &m.PlatformMsgID,
-			&m.SessionID, &m.Role, &m.Content, &m.TokenCount, &m.CreatedAt,
+			&m.SessionID, &m.Role, &m.Content, &m.TokenCount, &m.Metadata, &m.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

@@ -11,6 +11,7 @@ import (
 	"github.com/achmichael/pribadi-go/internal/budget"
 	"github.com/achmichael/pribadi-go/internal/classifier"
 	contextpkg "github.com/achmichael/pribadi-go/internal/context"
+	"github.com/achmichael/pribadi-go/internal/continuation"
 	"github.com/achmichael/pribadi-go/internal/conversation"
 	"github.com/achmichael/pribadi-go/internal/domain"
 	"github.com/achmichael/pribadi-go/internal/factmemory"
@@ -79,6 +80,7 @@ type coreOrchestrator struct {
 	reflector         reasoning.Reflector
 	responseProcessor response.Processor
 	interactionLogger response.InteractionLogger
+	contextualizer    continuation.Contextualizer
 	logger            *zerolog.Logger
 
 	canonicalIntents []canonicalIntent
@@ -102,6 +104,7 @@ func NewCoreOrchestrator(
 	reflector reasoning.Reflector,
 	responseProcessor response.Processor,
 	interactionLogger response.InteractionLogger,
+	contextualizer continuation.Contextualizer,
 	logger *zerolog.Logger,
 ) CoreOrchestrator {
 	o := &coreOrchestrator{
@@ -122,6 +125,7 @@ func NewCoreOrchestrator(
 		reflector:         reflector,
 		responseProcessor: responseProcessor,
 		interactionLogger: interactionLogger,
+		contextualizer:    contextualizer,
 		logger:            logger,
 	}
 
@@ -286,6 +290,40 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		}
 	}
 
+	contextualizeStart := time.Now()
+	historyMsgs, err := o.repo.ListMessagesByUserSession(ctx, msg.UserID, msg.SessionID, 6)
+	if err != nil {
+		o.logger.Warn().Err(err).Msg("[orchestrator] failed to load history for contextualization")
+	}
+
+	var history []continuation.HistoryMessage
+	for _, hm := range historyMsgs {
+		history = append(history, continuation.HistoryMessage{
+			Role:    hm.Role,
+			Content: hm.Content,
+		})
+	}
+
+	analysisResult, err := o.contextualizer.Analyze(ctx, userText, history)
+	if err != nil {
+		o.logger.Warn().Err(err).Msg("[orchestrator] contextualization failed, treating as standalone")
+		analysisResult = &continuation.AnalysisResult{
+			Type:           continuation.TypeStandalone,
+			RewrittenQuery: userText,
+		}
+	}
+
+	o.logger.Info().
+		Str("analysis_type", string(analysisResult.Type)).
+		Str("rewritten_query", analysisResult.RewrittenQuery).
+		Dur("ms", time.Since(contextualizeStart)).
+		Msg("[orchestrator] contextualization done")
+
+	isContinuation := analysisResult.Type == continuation.TypeContinue
+	if !isContinuation && analysisResult.RewrittenQuery != "" {
+		userText = analysisResult.RewrittenQuery
+	}
+
 	routerStart := time.Now()
 	routedIntent := o.routeIntent(ctx, userText)
 	o.logger.Info().
@@ -335,21 +373,29 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 	var skipRAG, skipMemory bool
 	var toolSchemas []ollama.Tool
 
-	switch strategy {
-	case StrategySkipAll:
+	if isContinuation {
 		skipRAG = true
 		skipMemory = true
 		toolSchemas = nil
+		
+		o.logger.Info().Msg("[orchestrator] CONTINUE mode: skipping RAG/memory, preparing verbatim history")
+	} else {
+		switch strategy {
+		case StrategySkipAll:
+			skipRAG = true
+			skipMemory = true
+			toolSchemas = nil
 
-	case StrategyAgentic:
-		skipRAG = true
-		skipMemory = true
-		toolSchemas = o.ollama.Schemas()
+		case StrategyAgentic:
+			skipRAG = true
+			skipMemory = true
+			toolSchemas = o.ollama.Schemas()
 
-	case StrategyPrefetch:
-		skipRAG = false
-		skipMemory = false
-		toolSchemas = o.ollama.Schemas()
+		case StrategyPrefetch:
+			skipRAG = false
+			skipMemory = false
+			toolSchemas = o.ollama.Schemas()
+		}
 	}
 
 	out.Deliver(ctx, msg.SessionID, ResponseChunk{
@@ -375,39 +421,81 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		Msg("[orchestrator] context build done")
 
 	var convHistory []prompt.HistoryMessage
+	var lastAssistantWasTruncated bool
+	var lastAssistantContent string
+	
 	if historyMsgs, err := o.repo.ListMessagesByUserSession(ctx, msg.UserID, msg.SessionID, 10); err == nil {
 		for _, m := range historyMsgs {
 			convHistory = append(convHistory, prompt.HistoryMessage{
 				Role:    m.Role,
 				Content: m.Content,
 			})
+			
+			if m.Role == "assistant" && m.Metadata != "" {
+				var meta map[string]interface{}
+				if json.Unmarshal([]byte(m.Metadata), &meta) == nil {
+					if truncated, ok := meta["truncated"].(bool); ok && truncated {
+						lastAssistantWasTruncated = true
+						lastAssistantContent = m.Content
+					}
+				}
+			}
 		}
 	}
 
-	composed, err := o.promptComposer.Compose(ctx, prompt.ComposeParams{
-		UserText:            userText,
-		Classification:      classResult,
-		Plan:                nil,
-		SessionContext:      sc,
-		ConversationHistory: convHistory,
-	})
-	if err != nil {
-		return fmt.Errorf("prompt composer: %w", err)
-	}
+	var messages []ollama.ChatMessage
+	
+	if isContinuation {
+		messages = []ollama.ChatMessage{
+			{Role: "system", Content: "Kamu adalah asisten AI yang membantu user. Lanjutkan jawabanmu sebelumnya persis dari titik terakhir. Jangan mengulang bagian yang sudah kamu sampaikan sebelumnya."},
+		}
+		
+		for _, h := range convHistory {
+			messages = append(messages, ollama.ChatMessage{
+				Role:    h.Role,
+				Content: h.Content,
+			})
+		}
+		
+		if lastAssistantWasTruncated && lastAssistantContent != "" {
+			messages = append(messages, ollama.ChatMessage{
+				Role:    "assistant",
+				Content: lastAssistantContent,
+			})
+			o.logger.Info().Msg("[orchestrator] using assistant prefill for truncated continuation")
+		}
+		
+		messages = append(messages, ollama.ChatMessage{
+			Role:    "user",
+			Content: userText,
+		})
+	} else {
+		composed, err := o.promptComposer.Compose(ctx, prompt.ComposeParams{
+			UserText:            userText,
+			Classification:      classResult,
+			Plan:                nil,
+			SessionContext:      sc,
+			ConversationHistory: convHistory,
+		})
+		if err != nil {
+			return fmt.Errorf("prompt composer: %w", err)
+		}
 
-	messages := []ollama.ChatMessage{
-		{Role: "system", Content: composed.SystemPrompt},
-		{Role: "user", Content: composed.UserPrompt},
+		messages = []ollama.ChatMessage{
+			{Role: "system", Content: composed.SystemPrompt},
+			{Role: "user", Content: composed.UserPrompt},
+		}
 	}
 
 	o.logger.Info().
 		Str("msg_id", msg.MessageID).
-		Int("sys_len", len(composed.SystemPrompt)).
-		Int("user_len", len(composed.UserPrompt)).
+		Bool("is_continuation", isContinuation).
+		Int("message_count", len(messages)).
 		Msg("[orchestrator] sending unified call to Ollama")
 
 	llmCallCount := 0
 	llmStart := time.Now()
+	var lastDoneReason string
 
 	out.Deliver(ctx, msg.SessionID, ResponseChunk{
 		Type:  ChunkStageEvent,
@@ -428,6 +516,7 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		}
 		llmCallCount++
 		rawResponse = result.Content
+		lastDoneReason = result.DoneReason
 
 		if len(result.ToolCalls) > 0 {
 			rawResponse, llmCallCount, err = o.handleToolCalls(ctx, messages, result.ToolCalls, msg.UserID, userText, targetDocID, llmCallCount, out)
@@ -450,6 +539,9 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 			if len(chunk.ToolCalls) > 0 {
 				accumulatedToolCalls = append(accumulatedToolCalls, chunk.ToolCalls...)
 			}
+			if chunk.DoneReason != "" {
+				lastDoneReason = chunk.DoneReason
+			}
 
 			if chunk.Content != "" {
 				out.Deliver(ctx, msg.SessionID, ResponseChunk{
@@ -468,6 +560,11 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		} else {
 			rawResponse = fullContent.String()
 		}
+
+		o.logger.Info().
+			Str("done_reason", lastDoneReason).
+			Bool("truncated", lastDoneReason == "length").
+			Msg("[orchestrator] stream done_reason captured")
 	}
 
 	llmDur := time.Since(llmStart)
@@ -478,6 +575,17 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		Int("response_len", len(rawResponse)).
 		Msg("[orchestrator] LLM generation complete")
 
+	var composedPrompt *prompt.ComposedPrompt
+	if !isContinuation {
+		composedPrompt, _ = o.promptComposer.Compose(ctx, prompt.ComposeParams{
+			UserText:            userText,
+			Classification:      classResult,
+			Plan:                nil,
+			SessionContext:      sc,
+			ConversationHistory: convHistory,
+		})
+	}
+
 	finalRes, err := o.responseProcessor.Process(ctx, response.ProcessParams{
 		UserID:         msg.UserID,
 		SessionID:      msg.SessionID,
@@ -485,7 +593,7 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		RawResponse:    rawResponse,
 		Classification: classResult,
 		Plan:           nil,
-		ComposedPrompt: composed,
+		ComposedPrompt: composedPrompt,
 		Verification:   nil,
 		RAGSources:     sc.RAGSources,
 		State:          stateData,
@@ -519,7 +627,16 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		Role:          "user",
 		Content:       userText,
 		TokenCount:    estimateTokens(userText),
+		Metadata:      "{}",
 	})
+
+	assistantMetadata := map[string]interface{}{}
+	if lastDoneReason == "length" {
+		assistantMetadata["truncated"] = true
+		assistantMetadata["done_reason"] = lastDoneReason
+	}
+	assistantMetadataJSON, _ := json.Marshal(assistantMetadata)
+
 	o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
 		UserID:     msg.UserID,
 		Platform:   platform,
@@ -527,6 +644,7 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		Role:       "assistant",
 		Content:    finalRes.Text,
 		TokenCount: estimateTokens(finalRes.Text),
+		Metadata:   string(assistantMetadataJSON),
 	})
 
 	if finalRes.ShouldUpdate {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/achmichael/pribadi-go/internal/classifier"
 	"github.com/achmichael/pribadi-go/internal/config"
+	"github.com/achmichael/pribadi-go/internal/continuation"
 	"github.com/achmichael/pribadi-go/internal/conversation"
 	contextpkg "github.com/achmichael/pribadi-go/internal/context"
 	"github.com/achmichael/pribadi-go/internal/delivery/scheduler"
@@ -137,6 +138,8 @@ func main() {
 	responseProcessor := response.NewProcessor(stateManager, memory, sqlite, log.Logger)
 	interactionLogger := response.NewInteractionLogger(sqlite, log.Logger)
 	
+	contextualizer := continuation.NewContextualizer(ollamaClient, log.Logger)
+
 	coreOrch := orchestrator.NewCoreOrchestrator(
 		ragIngest,
 		ragRetrieve,
@@ -155,6 +158,7 @@ func main() {
 		reflector,
 		responseProcessor,
 		interactionLogger,
+		contextualizer,
 		log.Logger,
 	)
 

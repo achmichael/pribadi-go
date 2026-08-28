@@ -18,6 +18,21 @@ type ToolRegistry interface {
 	Schemas() []Tool
 }
 
+type Client interface {
+	Chat(ctx context.Context, messages []ChatMessage) (string, error)
+	ChatJSON(ctx context.Context, messages []ChatMessage) (string, error)
+	ChatWithTools(ctx context.Context, messages []ChatMessage, format string) (*ChatResult, error)
+	ChatWithToolsDirect(ctx context.Context, messages []ChatMessage, format string, tools []Tool) (*ChatResult, error)
+	ChatStream(ctx context.Context, messages []ChatMessage, tools []Tool) (<-chan StreamChunk, error)
+	ChatStreamWithThink(ctx context.Context, messages []ChatMessage, tools []Tool, think bool) (<-chan StreamChunk, error)
+	Schemas() []Tool
+	NumCtx() int
+	NumPredict() int
+	GenerateEmbedding(ctx context.Context, text string) ([]float32, error)
+	SimplyChat(ctx context.Context, prompt string) (string, error)
+	GenerateChatTitle(ctx context.Context, message string) (string, error)
+}
+
 type ChatMessage struct {
 	Role      string     `json:"role"`
 	Content   string     `json:"content"`
@@ -57,13 +72,15 @@ type chatRequest struct {
 }
 
 type chatResponse struct {
-	Message ChatMessage `json:"message"`
-	Done    bool        `json:"done"`
+	Message    ChatMessage `json:"message"`
+	Done       bool        `json:"done"`
+	DoneReason string      `json:"done_reason,omitempty"`
 }
 
 type ChatResult struct {
-	Content   string
-	ToolCalls []ToolCall
+	Content    string
+	ToolCalls  []ToolCall
+	DoneReason string
 }
 
 type StageEvent struct {
@@ -73,12 +90,13 @@ type StageEvent struct {
 }
 
 type StreamChunk struct {
-	Content   string
-	Thinking  string
-	ToolCalls []ToolCall
-	Stage     *StageEvent
-	Done      bool
-	Err       error
+	Content    string
+	Thinking   string
+	ToolCalls  []ToolCall
+	Stage      *StageEvent
+	Done       bool
+	DoneReason string
+	Err        error
 }
 
 type embeddingRequest struct {
@@ -352,11 +370,13 @@ func (c *OllamaClient) doChatFull(ctx context.Context, messages []ChatMessage, f
 		Dur("decode_ms", time.Since(decodeStart)).
 		Int("reply_len", len(chatResp.Message.Content)).
 		Int("tool_calls", len(chatResp.Message.ToolCalls)).
+		Str("done_reason", chatResp.DoneReason).
 		Msg("[ollama] chat response decoded")
 
 	return &ChatResult{
-		Content:   chatResp.Message.Content,
-		ToolCalls: chatResp.Message.ToolCalls,
+		Content:    chatResp.Message.Content,
+		ToolCalls:  chatResp.Message.ToolCalls,
+		DoneReason: chatResp.DoneReason,
 	}, nil
 }
 
@@ -426,10 +446,11 @@ func (c *OllamaClient) ChatStreamWithThink(ctx context.Context, messages []ChatM
 			}
 
 			ch <- StreamChunk{
-				Content:   chunk.Message.Content,
-				Thinking:  chunk.Message.Thinking,
-				ToolCalls: chunk.Message.ToolCalls,
-				Done:      chunk.Done,
+				Content:    chunk.Message.Content,
+				Thinking:   chunk.Message.Thinking,
+				ToolCalls:  chunk.Message.ToolCalls,
+				Done:       chunk.Done,
+				DoneReason: chunk.DoneReason,
 			}
 
 			if chunk.Done {
