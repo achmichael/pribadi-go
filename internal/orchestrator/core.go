@@ -619,7 +619,7 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 	bgCtx := context.Background()
 
 	platform := strings.Split(msg.PlatformID, ":")[0]
-	o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
+	_, errInsertUser := o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
 		UserID:        msg.UserID,
 		Platform:      platform,
 		PlatformMsgID: msg.MessageID,
@@ -629,6 +629,9 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		TokenCount:    estimateTokens(userText),
 		Metadata:      "{}",
 	})
+	if errInsertUser != nil {
+		o.logger.Error().Err(errInsertUser).Msg("[orchestrator] failed to insert user message to history")
+	}
 
 	assistantMetadata := map[string]interface{}{}
 	if lastDoneReason == "length" {
@@ -637,7 +640,7 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 	}
 	assistantMetadataJSON, _ := json.Marshal(assistantMetadata)
 
-	o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
+	_, errInsertAsst := o.repo.InsertMessageV2(bgCtx, repository.InsertMessageV2Params{
 		UserID:     msg.UserID,
 		Platform:   platform,
 		SessionID:  msg.SessionID,
@@ -646,6 +649,9 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		TokenCount: estimateTokens(finalRes.Text),
 		Metadata:   string(assistantMetadataJSON),
 	})
+	if errInsertAsst != nil {
+		o.logger.Error().Err(errInsertAsst).Msg("[orchestrator] failed to insert assistant message to history")
+	}
 
 	if finalRes.ShouldUpdate {
 		o.responseProcessor.UpdateState(bgCtx, msg.UserID, msg.SessionID, classResult)
@@ -980,7 +986,7 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 		Msg("[orchestrator] document upload done")
 
 	platform := strings.Split(msg.PlatformID, ":")[0]
-	o.repo.InsertMessageV2(context.Background(), repository.InsertMessageV2Params{
+	_, errUser := o.repo.InsertMessageV2(context.Background(), repository.InsertMessageV2Params{
 		UserID:        msg.UserID,
 		Platform:      platform,
 		PlatformMsgID: msg.MessageID,
@@ -989,8 +995,11 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 		Content:       "[Mengirim Dokumen: " + fileName + "]",
 		TokenCount:    0,
 	})
+	if errUser != nil {
+		o.logger.Error().Err(errUser).Msg("[orchestrator] failed to insert user doc upload to history")
+	}
 
-	o.repo.InsertMessageV2(context.Background(), repository.InsertMessageV2Params{
+	_, errAsst := o.repo.InsertMessageV2(context.Background(), repository.InsertMessageV2Params{
 		UserID:     msg.UserID,
 		Platform:   platform,
 		SessionID:  msg.SessionID,
@@ -998,6 +1007,9 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 		Content:    summary,
 		TokenCount: 0,
 	})
+	if errAsst != nil {
+		o.logger.Error().Err(errAsst).Msg("[orchestrator] failed to insert assistant doc upload summary to history")
+	}
 	return nil
 }
 

@@ -168,7 +168,7 @@ func main() {
 	waOrchestrator := usecase.NewOrchestrator(coreOrch, waInbound, waOutbound, log.Logger)
 
 	// Web Adapters
-	webInbound := rest.NewInboundAdapter(webChatRepo, extraction, log.Logger)
+	webInbound := rest.NewInboundAdapter(webChatRepo, sqlite, extraction, log.Logger)
 
 	// WhatsApp Event Listener
 	routerAdapter := &messageRouterAdapter{orchestrator: waOrchestrator}

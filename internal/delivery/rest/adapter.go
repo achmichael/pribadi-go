@@ -27,17 +27,20 @@ type WebInboundRawEvent struct {
 
 type webInboundAdapter struct {
 	repo       repository.WebChatRepository
+	coreRepo   repository.Repository
 	extraction ExtractionService
 	logger     *zerolog.Logger
 }
 
 func NewInboundAdapter(
 	repo repository.WebChatRepository,
+	coreRepo repository.Repository,
 	extraction ExtractionService,
 	logger *zerolog.Logger,
 ) orchestrator.InboundAdapter {
 	return &webInboundAdapter{
 		repo:       repo,
+		coreRepo:   coreRepo,
 		extraction: extraction,
 		logger:     logger,
 	}
@@ -55,6 +58,16 @@ func (a *webInboundAdapter) Normalize(ctx context.Context, rawEvent any) (*orche
 	}
 	if session == nil || session.UserID != req.UserID {
 		return nil, fmt.Errorf("session not found or unauthorized")
+	}
+
+	// Ensure the user exists in the core SQLite database
+	_, err = a.coreRepo.GetUserByID(ctx, req.UserID)
+	if err != nil {
+		// User doesn't exist in core DB (or error occurred), try to create
+		err = a.coreRepo.CreateUser(ctx, req.UserID, "Web User")
+		if err != nil {
+			a.logger.Warn().Err(err).Str("user_id", req.UserID).Msg("Failed to auto-provision user in core DB")
+		}
 	}
 
 	normalized := &orchestrator.NormalizedInboundMessage{
