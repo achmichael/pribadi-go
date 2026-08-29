@@ -1343,7 +1343,7 @@ Resolve using Priority:
 ## TASK
 Step 1: Analyze whether the user is referring to a document indirectly or directly.
 Step 2: Resolve the reference using the strict ACTIVE DOCUMENT RULE.
-Step 3: Rewrite the query by embedding the target_document_id. Example: User: "Siapa penulisnya?", Rewritten: "Siapa penulis dari document_id=%s?"
+	Step 3: Rewrite the query by embedding the file_name or title instead of the raw document_id. Example: User: "Siapa penulisnya?", Rewritten: "Siapa penulis dari dokumen 'Proposal Skripsi.pdf'?"
 
 IMPORTANT: Return ONLY a valid JSON object with the following structure, and no other text:
 {
@@ -1351,8 +1351,8 @@ IMPORTANT: Return ONLY a valid JSON object with the following structure, and no 
   "target_document_id": "the resolved document ID, or empty string if none"
 }
 
-Current User Query: %s
-`, docRegistry.String(), history.String(), docs[0].ID, userText)
+	Current User Query: %s
+	`, docRegistry.String(), history.String(), userText)
 
 	messages := []ollama.ChatMessage{
 		{Role: "user", Content: prompt},
