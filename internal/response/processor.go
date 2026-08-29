@@ -140,6 +140,23 @@ func (p *processor) Process(ctx context.Context, params ProcessParams) (*FinalRe
 		metadata.ConfidenceScore = params.Verification.ConfidenceScore
 		metadata.HallucinationRisk = params.Verification.HallucinationRisk
 	}
+
+	// ─── Post-generation Grounding Check (Safety Net) ───
+	if params.ComposedPrompt != nil && params.ComposedPrompt.IncludedRAG {
+		// Rely on verification result if present
+		if params.Verification != nil {
+			if !params.Verification.IsValid {
+				p.logger.Warn().
+					Str("user_id", params.UserID).
+					Str("session_id", params.SessionID).
+					Float32("confidence", metadata.ConfidenceScore).
+					Msg("[grounding] entity mismatch or hallucination risk detected by verifier")
+				
+				metadata.ConfidenceScore = 0.5
+				metadata.HallucinationRisk = "medium"
+			}
+		}
+	}
 	
 	// Determine if state/memory should update
 	shouldUpdate := true

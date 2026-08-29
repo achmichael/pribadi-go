@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/achmichael/pribadi-go/internal/chunker"
@@ -84,15 +83,6 @@ func (s *ingestionService) IngestText(ctx context.Context, text string, metadata
 		return 0, nil
 	}
 
-	// Prepare metadata header string once per document
-	var metaHeaderBuilder strings.Builder
-	metaHeaderBuilder.WriteString("[Document Metadata]\n")
-	for k, v := range metadata {
-		metaHeaderBuilder.WriteString(fmt.Sprintf("%s: %s\n", k, v))
-	}
-	metaHeaderBuilder.WriteString("---\n\n")
-	metaHeaderStr := metaHeaderBuilder.String()
-
 	upserted := 0
 	for i, chunk := range chunks {
 		chunkStart := time.Now()
@@ -106,8 +96,8 @@ func (s *ingestionService) IngestText(ctx context.Context, text string, metadata
 
 		id := fmt.Sprintf("%s-chunk-%d", sourceFile, chunk.ChunkIndex)
 
-		// Prepend metadata header to chunk content
-		enrichedContent := metaHeaderStr + chunk.Content
+		// Store raw content, we'll prepend metadata dynamically on retrieval
+		enrichedContent := chunk.Content
 		
 		if i == 0 {
 			s.logger.Info().

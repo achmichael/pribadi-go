@@ -148,6 +148,7 @@ func (o *coreOrchestrator) warmCanonicalIntents() {
 		{"preference", "jawab dalam bahasa panggil aku pakai format"},
 		{"ask_personal", "siapa nama saya dimana saya tinggal apa pekerjaan saya"},
 		{"ask_document", "apa isi dokumen ringkas file jelaskan paper"},
+		{"ask_document_metadata", "siapa penulis dokumen ini dari kampus mana judulnya apa tahun berapa dibuat apa institusi penulisnya author document"},
 	}
 
 	for _, intent := range intents {
@@ -190,7 +191,7 @@ func (o *coreOrchestrator) routeIntent(ctx context.Context, userText string) str
 		Float32("score", bestScore).
 		Msg("[orchestrator] embedding router result")
 
-	if bestScore >= 0.65 {
+	if bestScore >= 0.55 { // Lower threshold a bit since sometimes embeddings don't perfectly align
 		return bestLabel
 	}
 	return ""
@@ -224,8 +225,9 @@ func isDefinitelyNoRetrievalIntent(intent string) bool {
 
 func isDefinitelyNeedsRetrievalIntent(intent string) bool {
 	needsRetrievalIntents := map[string]bool{
-		"ask_document":    true,
-		"document_query":  true,
+		"ask_document":          true,
+		"document_query":        true,
+		"ask_document_metadata": true,
 	}
 	return needsRetrievalIntents[intent]
 }
@@ -362,6 +364,126 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 	}
 
 	strategy := o.decideRetrievalStrategy(decision, targetDocID)
+
+	// Short-circuit for document metadata questions
+	if decision.Intent == "ask_document_metadata" {
+		if targetDocID == "" {
+			// If no targetDocID is explicitly resolved, try to get the latest active document
+			docs, err := o.repo.GetLatestUserDocuments(ctx, msg.UserID, 1)
+			if err == nil && len(docs) > 0 {
+				targetDocID = docs[0].ID
+			}
+		}
+
+		if targetDocID != "" {
+			doc, err := o.repo.GetUserDocumentByID(ctx, targetDocID)
+			if err == nil && doc.ID != "" {
+				var meta map[string]interface{}
+				json.Unmarshal([]byte(doc.MetadataJSON), &meta)
+				
+				// Instead of a rigid short-circuit, we generate a synthetic chunk
+				// that strictly contains ONLY the metadata properties, and pass it to the LLM 
+				// as forced context. 
+				
+				metadataContext := fmt.Sprintf("Berikut adalah data metadata resmi dari dokumen %s:\n", doc.FileName)
+				if doc.Title != "" && doc.Title != "Unknown" {
+					metadataContext += fmt.Sprintf("Judul: %s\n", doc.Title)
+				}
+				if doc.Author != "" && doc.Author != "Unknown" {
+					metadataContext += fmt.Sprintf("Penulis: %s\n", doc.Author)
+				}
+				if meta != nil {
+					if inst, ok := meta["institution"].(string); ok && inst != "" {
+						metadataContext += fmt.Sprintf("Institusi: %s\n", inst)
+					}
+					if year, ok := meta["publication_year"].(string); ok && year != "" {
+						metadataContext += fmt.Sprintf("Tahun Terbit: %s\n", year)
+					}
+					if dt, ok := meta["document_type"].(string); ok && dt != "" {
+						metadataContext += fmt.Sprintf("Jenis Dokumen: %s\n", dt)
+					}
+				}
+
+				// We force the context builder to use THIS exact text as RAG context instead of searching vector DB.
+				// By overriding `skipRAG` and setting `targetDocID = "METADATA_INJECT"`, we can hijack the context step.
+				// However, a simpler way is to just inject it directly into the user text or handle it here via LLM call.
+
+				// To ensure the tone matches, we let the LLM generate the response based ONLY on this injected context.
+				o.logger.Info().
+					Str("doc_id", targetDocID).
+					Msg("[orchestrator] routing document metadata request to LLM with constrained context")
+
+				// Format a prompt forcing the LLM to just answer the user's specific question based on the metadata block.
+				systemPrompt := `Anda adalah asisten cerdas yang menjawab pertanyaan pengguna HANYA berdasarkan konteks metadata berikut. Jangan mengarang informasi di luar konteks ini. Jawab dengan ramah dan natural (tone: casual), jangan terlihat kaku seperti robot. Jawab langsung pada inti pertanyaannya saja.`
+				
+				messages := []ollama.ChatMessage{
+					{Role: "system", Content: systemPrompt + "\n\nKONTEKS METADATA:\n" + metadataContext},
+					{Role: "user", Content: userText},
+				}
+
+				llmStart := time.Now()
+				out.Deliver(ctx, msg.SessionID, ResponseChunk{
+					Type:  ChunkStageEvent,
+					Stage: "generating",
+				})
+
+				streamCh, streamErr := o.ollama.ChatStream(ctx, messages, nil)
+				var rawResponse string
+
+				if streamErr != nil {
+					result, err := o.ollama.ChatWithTools(ctx, messages, "")
+					if err != nil {
+						o.logger.Error().Err(err).Msg("[orchestrator] constrained LLM generation failed")
+						return err
+					}
+					rawResponse = result.Content
+				} else {
+					var fullContent strings.Builder
+					for chunk := range streamCh {
+						if chunk.Err != nil {
+							break
+						}
+						fullContent.WriteString(chunk.Content)
+						if chunk.Content != "" {
+							out.Deliver(ctx, msg.SessionID, ResponseChunk{
+								Type: ChunkToken,
+								Text: chunk.Content,
+							})
+						}
+					}
+					rawResponse = fullContent.String()
+				}
+
+				llmDur := time.Since(llmStart)
+
+				// Wrap up response processor stuff manually since we skipped the main flow
+				finalRes, _ := o.responseProcessor.Process(ctx, response.ProcessParams{
+					UserID:         msg.UserID,
+					SessionID:      msg.SessionID,
+					UserMessage:    userText,
+					RawResponse:    rawResponse,
+					Classification: classResult,
+					Plan:           nil,
+					ComposedPrompt: nil, 
+					Verification:   nil,
+					RAGSources:     []string{doc.FileName}, // cite the file
+					State:          stateData,
+				})
+
+				finalRes.Metadata.TotalDurationMs = time.Since(handleStart).Milliseconds()
+				finalRes.Metadata.LLMInferenceMs = llmDur.Milliseconds()
+				finalRes.Metadata.ConfidenceScore = 1.0 // It's deterministically sourced
+
+				out.Deliver(ctx, msg.SessionID, ResponseChunk{
+					Type: ChunkDone,
+					Text: finalRes.Text,
+				})
+
+				o.persistAndLog(msg.UserID, msg.SessionID, msg.MessageID, userText, finalRes.Text, classResult, handleStart, nil)
+				return nil
+			}
+		}
+	}
 
 	o.logger.Info().
 		Str("intent", decision.Intent).

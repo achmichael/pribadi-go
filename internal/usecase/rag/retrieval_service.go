@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"time"
+	"fmt"
 
 	"github.com/achmichael/pribadi-go/internal/repository"
 	"github.com/rs/zerolog"
@@ -48,6 +49,9 @@ func (s *retrievalService) Retrieve(ctx context.Context, question string, target
 	results, err := s.vectorRepo.Search(ctx, question, 4, targetDocID)
 	searchDur := time.Since(start)
 
+	for _, res := range results {
+		fmt.Print("res", res.Content)
+	}
 	if err != nil {
 		s.logger.Error().Err(err).
 			Dur("duration_ms", searchDur).
@@ -64,6 +68,8 @@ func (s *retrievalService) Retrieve(ctx context.Context, question string, target
 
 	var sb strings.Builder
 	var sources []string
+	var metadataHeader string
+	headerWritten := false
 
 	// Only include results above relevance threshold.
 	const minScore float32 = 0.3
@@ -71,10 +77,32 @@ func (s *retrievalService) Retrieve(ctx context.Context, question string, target
 		if res.Score < minScore {
 			continue
 		}
-		if i > 0 {
+		
+		content := res.Content
+		
+		// If we haven't extracted the header yet and we see it, extract it
+		if strings.HasPrefix(content, "[Document Metadata]\n") {
+			parts := strings.SplitN(content, "---\n\n", 2)
+			if len(parts) == 2 {
+				if metadataHeader == "" {
+					metadataHeader = parts[0] + "---\n\n"
+				}
+				content = parts[1] // Use only the body for the chunk
+			}
+		}
+
+		// Write header only once at the very beginning of the context
+		if !headerWritten && metadataHeader != "" {
+			sb.WriteString(metadataHeader)
+			headerWritten = true
+		} else if i > 0 && metadataHeader != "" {
+			// Only add separator if we're not the first chunk and header is already written
+			sb.WriteString("\n---\n")
+		} else if i > 0 {
 			sb.WriteString("\n---\n")
 		}
-		sb.WriteString(res.Content)
+		
+		sb.WriteString(content)
 
 		source := res.Metadata["source_file"]
 		if source != "" {
@@ -87,6 +115,7 @@ func (s *retrievalService) Retrieve(ctx context.Context, question string, target
 	s.logger.Info().
 		Int("results_count", len(results)).
 		Int("context_len", len(contextText)).
+		Str("context_content", contextText). // <-- LOG CONTENT RAG
 		Float32("top_score", results[0].Score).
 		Dur("duration_ms", searchDur).
 		Msg("[retrieval] search done")
@@ -122,29 +151,53 @@ func (s *retrievalService) RetrieveFiltered(ctx context.Context, question string
 
 	var sb strings.Builder
 	var sources []string
+	var metadataHeader string
+	headerWritten := false
+
 	const minScore float32 = 0.3
 	for i, res := range results {
 		if res.Score < minScore {
 			continue
 		}
-		if i > 0 {
+
+		content := res.Content
+		
+		if strings.HasPrefix(content, "[Document Metadata]\n") {
+			parts := strings.SplitN(content, "---\n\n", 2)
+			if len(parts) == 2 {
+				if metadataHeader == "" {
+					metadataHeader = parts[0] + "---\n\n"
+				}
+				content = parts[1]
+			}
+		}
+
+		if !headerWritten && metadataHeader != "" {
+			sb.WriteString(metadataHeader)
+			headerWritten = true
+		} else if i > 0 {
 			sb.WriteString("\n---\n")
 		}
-		sb.WriteString(res.Content)
+		
+		sb.WriteString(content)
+		
 		source := res.Metadata["source_file"]
 		if source != "" {
 			sources = append(sources, source)
 		}
 	}
 
+	contextText := sb.String()
+
 	s.logger.Info().
 		Int("results_count", len(results)).
+		Str("context_content", contextText). // <-- LOG CONTENT RAG PADA FILTERED
 		Float32("top_score", results[0].Score).
 		Dur("ms", time.Since(start)).
 		Msg("[retrieval] filtered search done")
 
 	return PromptContext{
-		Context:    sb.String(),
+		Context:    contextText,
 		Sources:    sources,
 		HasResults: true,
 	}, nil

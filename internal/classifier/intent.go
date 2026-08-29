@@ -218,13 +218,25 @@ func (c *intentClassifier) HeuristicOnly(params ClassifyParams) *Classification 
 func (c *intentClassifier) heuristicClassify(params ClassifyParams) *Classification {
 	text := strings.TrimSpace(strings.ToLower(params.UserText))
 
-	// Greeting patterns
-	greetings := []string{"hi", "halo", "hello", "hey", "hai", "selamat pagi", "selamat siang", "selamat malam", "pagi", "siang", "malam", "makasih", "makasih lo", "terima kasih", "thanks", "aamiiinn", "amin", "amiiin"}
+	// Greeting and casual patterns
+	greetings := []string{"hi", "halo", "hello", "hey", "hai", "selamat pagi", "selamat siang", "selamat malam", "pagi", "siang", "malam", "aamiiinn", "amin", "amiiin"}
 	for _, g := range greetings {
 		if text == g || (strings.HasPrefix(text, g+" ") && len(text) < 30) {
 			return &Classification{
 				MessageClass: ClassCasual,
 				Intent:       IntentChitChat,
+				Confidence:   "high",
+			}
+		}
+	}
+	
+	// Thanks patterns
+	thanks := []string{"makasih", "makasih lo", "terima kasih", "thanks", "thank you", "makasih ya", "terimakasih"}
+	for _, t := range thanks {
+		if text == t || (strings.HasPrefix(text, t+" ") && len(text) < 30) {
+			return &Classification{
+				MessageClass: ClassCasual,
+				Intent:       "thanks",
 				Confidence:   "high",
 			}
 		}

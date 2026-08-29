@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/achmichael/pribadi-go/internal/budget"
 	"github.com/achmichael/pribadi-go/internal/conversation"
 	"github.com/achmichael/pribadi-go/internal/domain"
 	"github.com/achmichael/pribadi-go/internal/factmemory"
@@ -121,10 +122,10 @@ func (b *builder) Build(ctx context.Context, params BuildParams) (*prompt.Sessio
 	} else {
 		go func() {
 			retStart := time.Now()
-			
+
 			var ctxInfo rag.PromptContext
 			var err error
-			
+
 			if params.TargetDocID != "" {
 				ctxInfo, err = b.ragRetrieve.RetrieveFiltered(ctx, params.RAGQuery, map[string]string{
 					"document_id": params.TargetDocID,
@@ -134,7 +135,7 @@ func (b *builder) Build(ctx context.Context, params BuildParams) (*prompt.Sessio
 					"session_id": params.SessionID,
 				})
 			}
-			
+
 			b.logger.Info().
 				Bool("has_results", ctxInfo.HasResults).
 				Int("context_len", len(ctxInfo.Context)).
@@ -191,13 +192,24 @@ func (b *builder) Build(ctx context.Context, params BuildParams) (*prompt.Sessio
 	if raw, err := b.stateManager.GetRaw(ctx, params.UserID, params.SessionID); err == nil && raw != nil {
 		turnCount = raw.TurnCount
 	}
-	
-	// If we have full file text, we want to bypass RAG Context and just use it
-	if fullFileText != "" {
-		ctxInfo.Context = fmt.Sprintf("[FILE UPLOAD — Isi lengkap file yang baru diupload user]\n\n---\n%s\n---", fullFileText)
+
+	// If we have full file text, check if it fits context budget.
+	// We instantiate a calculator matching the system defaults (32k ctx).
+	calc := budget.NewCalculator(4096, 2048)
+	fileTokens := budget.EstimateTokens(fullFileText)
+
+	if fullFileText != "" && calc.FitsInContext(fileTokens, promptTemplate, nil) {
+		// Include metadata block in the full text override
+		ctxInfo.Context = fmt.Sprintf("[FILE UPLOAD — Isi lengkap file yang baru diupload user. Ingat, gunakan informasi di metadata dokumen ini. Jika ditanya penulisnya, baca bagian 'Author' dari file atau metadata, dan HIRAUKAN daftar pustaka.]\n\n<SYSTEM_METADATA_DO_NOT_CITE>\n%s\n</SYSTEM_METADATA_DO_NOT_CITE>\n\n---\n%s\n---", metadataBlock, fullFileText)
 		ctxInfo.HasResults = true
-		ctxInfo.Sources = []string{"Dokumen Aktif (Full)"}
-		b.logger.Info().Msg("[routing] Context builder injected full file text directly, overriding RAG")
+		ctxInfo.Sources = []string{"<SYSTEM_METADATA_DO_NOT_CITE>Dokumen Aktif (Full)</SYSTEM_METADATA_DO_NOT_CITE>"}
+		b.logger.Info().
+			Int("file_tokens", fileTokens).
+			Msg("[routing] Context builder injected full file text directly (fits budget), overriding RAG")
+	} else if fullFileText != "" {
+		b.logger.Info().
+			Int("file_tokens", fileTokens).
+			Msg("[routing] Full file text exceeds context budget. Using RAG results instead of overriding.")
 	}
 
 	sc := &prompt.SessionContext{
@@ -267,24 +279,24 @@ func (b *builder) buildMetadataBlock(ctx context.Context, docID string) (string,
 
 	metadataJSON := doc.MetadataJSON
 	fullText := ""
-	
+
 	if metadataJSON != "" && metadataJSON != "{}" {
 		var metaDataObj map[string]interface{}
 		if err := json.Unmarshal([]byte(metadataJSON), &metaDataObj); err == nil {
 			if ft, ok := metaDataObj["full_text"].(string); ok {
 				fullText = ft
+				// fmt.Print(metaDataObj["full_text"])
 				// Remove full_text from metadata so it doesn't pollute the prompt header
 				delete(metaDataObj, "full_text")
 				bBytes, _ := json.Marshal(metaDataObj)
 				metadataJSON = string(bBytes)
 			}
 		}
-	}
-	
-	if metadataJSON == "" || metadataJSON == "{}" {
+	} else {
+		// Fallback for metadata if empty
 		basicMeta := map[string]string{
 			"title":  doc.Title,
-			"author": doc.Author,
+			"Author": doc.Author, // Force uppercase Author to match prompt expectations
 		}
 		bBytes, _ := json.Marshal(basicMeta)
 		metadataJSON = string(bBytes)
@@ -292,6 +304,7 @@ func (b *builder) buildMetadataBlock(ctx context.Context, docID string) (string,
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("--- DOCUMENT METADATA (AKTIF: document_id=%s) ---\n", doc.ID))
+	sb.WriteString("INFORMASI PENTING TENTANG DOKUMEN INI (HARUS DIPATUHI):\n")
 	sb.WriteString(metadataJSON)
 	sb.WriteString("\n--- END METADATA ---\n")
 	return sb.String(), fullText

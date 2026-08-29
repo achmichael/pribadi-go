@@ -134,10 +134,11 @@ func (b *Builder) buildDocumentIsolatedPrompt(sc SessionContext) string {
 	sb.WriteString("1. Dokumen yang SEDANG AKTIF adalah dokumen dengan metadata berikut:\n")
 	sb.WriteString(sc.MetadataBlock)
 	sb.WriteString("\n")
-	sb.WriteString("2. Jika pengguna menanyakan informasi spesifik mengenai isi dokumen ini, jawablah berdasarkan potongan teks (chunks) di bawah ini.\n\n")
-	sb.WriteString("3. Anda sudah memiliki kemampuan membaca dokumen melalui konteks teks di bawah ini. Bertindaklah seolah Anda membaca dokumen tersebut secara langsung.\n\n")
-	sb.WriteString("4. Jika pengguna menanyakan pertanyaan umum (general knowledge) atau di luar konteks dokumen, jawablah secara natural menggunakan pengetahuan umum Anda yang luas. Jika ada kaitan yang menarik dengan dokumen aktif, Anda boleh menyebutkannya.\n\n")
-	sb.WriteString(fmt.Sprintf("5. Jika pengguna secara spesifik merujuk pada dokumen lain (document_id berbeda dari %s), beri tahu mereka bahwa dokumen yang sedang aktif saat ini adalah dokumen ini.\n\n", sc.TargetDocID))
+	sb.WriteString("2. PENTING: Untuk menjawab siapa PENULIS atau AUTHOR dokumen, ANDA WAJIB HANYA MEMBACA BAGIAN 'Author' DARI METADATA DI ATAS ATAU REFERENSI SUMBER. Jika ditanya penulis dan metadata memilikinya, SEBUTKAN NAMA DI METADATA. Jangan pernah membaca daftar pustaka untuk mencari nama penulis.\n")
+	sb.WriteString("3. Jika pengguna menanyakan informasi spesifik mengenai isi dokumen ini, jawablah berdasarkan potongan teks (chunks) di bawah ini.\n\n")
+	sb.WriteString("4. Anda sudah memiliki kemampuan membaca dokumen melalui konteks teks di bawah ini. Bertindaklah seolah Anda membaca dokumen tersebut secara langsung.\n\n")
+	sb.WriteString("5. Jika pengguna menanyakan pertanyaan umum (general knowledge) atau di luar konteks dokumen, jawablah secara natural menggunakan pengetahuan umum Anda yang luas. Jika ada kaitan yang menarik dengan dokumen aktif, Anda boleh menyebutkannya.\n\n")
+	sb.WriteString(fmt.Sprintf("6. Jika pengguna secara spesifik merujuk pada dokumen lain (document_id berbeda dari %s), beri tahu mereka bahwa dokumen yang sedang aktif saat ini adalah dokumen ini.\n\n", sc.TargetDocID))
 
 	// RAG omitted here, moved to User Prompt.
 	sb.WriteString("Silakan merujuk pada konteks dokumen yang dilampirkan bersama pertanyaan pengguna.\n")

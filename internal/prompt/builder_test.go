@@ -135,16 +135,16 @@ func TestBuild_WithTemplate(t *testing.T) {
 	}
 }
 
-func TestTruncateRAG(t *testing.T) {
-	b := NewBuilder()
-
-	long := strings.Repeat("x", 5000)
-	result := b.truncateRAG(long)
-
-	if len(result) > maxContextChars+50 {
-		t.Errorf("expected truncation, got len=%d", len(result))
+	func TestTruncateRAG(t *testing.T) {
+		b := NewBuilder()
+	
+		long := strings.Repeat("x", 60000)
+		result := b.truncateRAG(long)
+	
+		if len(result) > 50000+50 {
+			t.Errorf("expected truncation, got len=%d", len(result))
+		}
+		if !strings.Contains(result, "[...context truncated...]") {
+			t.Error("expected truncation marker")
+		}
 	}
-	if !strings.Contains(result, "[...context truncated...]") {
-		t.Error("expected truncation marker")
-	}
-}
