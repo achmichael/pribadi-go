@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/achmichael/pribadi-go/internal/factmemory"
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/rs/zerolog"
 )
 
@@ -51,14 +51,14 @@ type FactCheckParams struct {
 // ─── Implementation ────────────────────────────────────────────────
 
 type factChecker struct {
-	llm    *ollama.OllamaClient
+	llm    llm.Client
 	memory factmemory.MemoryManager
 	logger *zerolog.Logger
 }
 
 // NewFactChecker creates a FactChecker.
 func NewFactChecker(
-	llm *ollama.OllamaClient,
+	llm llm.Client,
 	memory factmemory.MemoryManager,
 	logger *zerolog.Logger,
 ) FactChecker {
@@ -141,7 +141,7 @@ Return ONLY a JSON array of strings, each containing one factual claim:
 
 If no factual claims, return empty array: []`, response)
 
-	messages := []ollama.ChatMessage{
+	messages := []llm.ChatMessage{
 		{Role: "user", Content: prompt},
 	}
 
@@ -179,7 +179,7 @@ Return ONLY valid JSON:
   "needs_external": true/false
 }`, claim, ragContext, memoryContext, claim)
 
-	messages := []ollama.ChatMessage{
+	messages := []llm.ChatMessage{
 		{Role: "user", Content: prompt},
 	}
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/rs/zerolog"
 )
 
@@ -33,11 +33,11 @@ type Contextualizer interface {
 }
 
 type llmContextualizer struct {
-	ollama ollama.Client
+	ollama llm.Client
 	logger *zerolog.Logger
 }
 
-func NewContextualizer(ollama ollama.Client, logger *zerolog.Logger) Contextualizer {
+func NewContextualizer(ollama llm.Client, logger *zerolog.Logger) Contextualizer {
 	return &llmContextualizer{
 		ollama: ollama,
 		logger: logger,
@@ -116,7 +116,7 @@ func (c *llmContextualizer) Analyze(ctx context.Context, userText string, histor
 
 	prompt := fmt.Sprintf(contextualizationPrompt, historyStr, userText)
 
-	messages := []ollama.ChatMessage{
+	messages := []llm.ChatMessage{
 		{Role: "user", Content: prompt},
 	}
 

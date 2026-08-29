@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/achmichael/pribadi-go/internal/repository"
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/rs/zerolog"
 )
 
@@ -42,13 +42,13 @@ type TaskClassification struct {
 // ─── Implementation ────────────────────────────────────────────────
 
 type taskClassifier struct {
-	llm    *ollama.OllamaClient
+	llm    llm.Client
 	repo   repository.Repository
 	logger *zerolog.Logger
 }
 
 // NewTaskClassifier creates a TaskClassifier.
-func NewTaskClassifier(llm *ollama.OllamaClient, repo repository.Repository, logger *zerolog.Logger) TaskClassifier {
+func NewTaskClassifier(llm llm.Client, repo repository.Repository, logger *zerolog.Logger) TaskClassifier {
 	return &taskClassifier{
 		llm:    llm,
 		repo:   repo,
@@ -122,7 +122,7 @@ Return ONLY valid JSON:
   "confidence": "high/medium/low"
 }`, params.ActiveTask, history, params.UserText)
 
-	messages := []ollama.ChatMessage{
+	messages := []llm.ChatMessage{
 		{Role: "user", Content: prompt},
 	}
 

@@ -23,8 +23,8 @@ type ollamaEmbedResponse struct {
 	Embeddings [][]float32 `json:"embeddings"`
 }
 
-// OllamaEmbedder provides embedding functionality using Ollama.
-type OllamaEmbedder struct {
+// Embedder provides embedding functionality using Ollama.
+type Embedder struct {
 	baseURL   string
 	model     string
 	client    *http.Client
@@ -32,9 +32,9 @@ type OllamaEmbedder struct {
 	keepAlive string            // Ollama keep_alive duration string
 }
 
-// NewOllamaEmbedder creates a new Ollama embedder.
-func NewOllamaEmbedder(baseURL, model string) *OllamaEmbedder {
-	return &OllamaEmbedder{
+// NewEmbedder creates a new Ollama embedder.
+func NewEmbedder(baseURL, model string) *Embedder {
+	return &Embedder{
 		baseURL:   baseURL,
 		model:     model,
 		keepAlive: "30m", // keep model loaded 30 min to avoid cold-start
@@ -46,13 +46,13 @@ func NewOllamaEmbedder(baseURL, model string) *OllamaEmbedder {
 
 // Warmup preloads the embedding model into Ollama memory so first real
 // request doesn't pay cold-start penalty (~60s → <1s).
-func (e *OllamaEmbedder) Warmup(ctx context.Context) error {
+func (e *Embedder) Warmup(ctx context.Context) error {
 	_, err := e.Embed(ctx, "warmup")
 	return err
 }
 
 // Embed generates embeddings for the given text using Ollama /api/embed.
-func (e *OllamaEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (e *Embedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	// Check cache first (useful for repeated identical queries).
 	if cached, ok := e.cache.Load(text); ok {
 		return cached.([]float32), nil

@@ -13,7 +13,7 @@ import (
 	"github.com/achmichael/pribadi-go/internal/domain"
 	"github.com/achmichael/pribadi-go/internal/factmemory"
 	"github.com/achmichael/pribadi-go/internal/repository"
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/rs/zerolog"
 )
 
@@ -71,7 +71,7 @@ type ConsistencyParams struct {
 // ─── Implementation ────────────────────────────────────────────────
 
 type verifier struct {
-	llm    *ollama.OllamaClient
+	llm    llm.Client
 	repo   repository.Repository
 	memory factmemory.MemoryManager
 	logger *zerolog.Logger
@@ -79,7 +79,7 @@ type verifier struct {
 
 // NewVerifier creates a Verifier.
 func NewVerifier(
-	llm *ollama.OllamaClient,
+	llm llm.Client,
 	repo repository.Repository,
 	memory factmemory.MemoryManager,
 	logger *zerolog.Logger,
@@ -117,7 +117,7 @@ func (v *verifier) Verify(ctx context.Context, params VerifyParams) (*Verificati
 	// Build verification prompt
 	prompt := v.buildVerificationPrompt(params, hasRecentCorrection)
 
-	messages := []ollama.ChatMessage{
+	messages := []llm.ChatMessage{
 		{Role: "user", Content: prompt},
 	}
 
@@ -175,7 +175,7 @@ Return ONLY valid JSON:
   "previous_statements": ["relevant previous statements that contradict"]
 }`, historyText.String(), params.Response)
 
-	messages := []ollama.ChatMessage{
+	messages := []llm.ChatMessage{
 		{Role: "user", Content: prompt},
 	}
 

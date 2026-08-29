@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/rs/zerolog"
 )
 
@@ -46,12 +46,12 @@ type Reflector interface {
 // ─── Implementation ────────────────────────────────────────────────
 
 type reflector struct {
-	llm    *ollama.OllamaClient
+	llm    llm.Client
 	logger *zerolog.Logger
 }
 
 // NewReflector creates a Reflector.
-func NewReflector(llm *ollama.OllamaClient, logger *zerolog.Logger) Reflector {
+func NewReflector(llm llm.Client, logger *zerolog.Logger) Reflector {
 	return &reflector{
 		llm:    llm,
 		logger: logger,
@@ -72,7 +72,7 @@ func (r *reflector) Reflect(ctx context.Context, params ReflectionParams) (*Refl
 
 	prompt := r.buildReflectionPrompt(params)
 
-	messages := []ollama.ChatMessage{
+	messages := []llm.ChatMessage{
 		{Role: "user", Content: prompt},
 	}
 

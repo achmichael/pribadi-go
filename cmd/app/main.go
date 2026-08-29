@@ -35,7 +35,7 @@ import (
     authinfra "github.com/achmichael/pribadi-go/internal/auth/infrastructure"
     authuc "github.com/achmichael/pribadi-go/internal/auth/usecase"
     authhttp "github.com/achmichael/pribadi-go/internal/auth/transport/http"
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/achmichael/pribadi-go/pkg/utils"
 	tele "gopkg.in/telebot.v3"
 	"time"
@@ -78,14 +78,14 @@ func main() {
 
 	fileRepo, _ := repository.NewFileRepository(cfg.LocalDiskPath)
 	toolRegistry := tools.NewRegistry()
-	ollamaClient := ollama.NewClient(cfg.OllamaBaseURL, cfg.OllamaModel, cfg.OllamaNumCtx, cfg.OllamaNumPredict, log.Logger, toolRegistry)
+	ollamaClient := llm.NewOllamaClient(cfg.OllamaBaseURL, cfg.OllamaModel, cfg.OllamaNumCtx, cfg.OllamaNumPredict, log.Logger, toolRegistry)
 
 	memory, err := factmemory.NewMemoryManager(sqlite, ollamaClient, cfg.QdrantAddr, cfg.OllamaBaseURL, log.Logger)
 
 	// Pre-warm both models so first user request doesn't pay cold-start penalty.
 	go func() {
 		log.Info().Msg("Warming up embedding model...")
-		embedder := utils.NewOllamaEmbedder(cfg.OllamaBaseURL, "nomic-embed-text")
+		embedder := utils.NewEmbedder(cfg.OllamaBaseURL, "nomic-embed-text")
 		if err := embedder.Warmup(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("Embedding warmup failed")
 		} else {
@@ -120,7 +120,7 @@ func main() {
 	dashboardService := usecase.NewDashboardService(dashboardRepo, cfg.DashboardJWT, log.Logger)
 	
 	resolver := identity.NewResolver(sqlite, log.Logger)
-	embedder := utils.NewOllamaEmbedder(cfg.OllamaBaseURL, "nomic-embed-text")
+	embedder := utils.NewEmbedder(cfg.OllamaBaseURL, "nomic-embed-text")
 	
 	// ── Pipeline Components ────────────────────────────────────────
 	stateManager := conversation.NewStateManager(sqlite, log.Logger)
@@ -140,10 +140,18 @@ func main() {
 	
 	contextualizer := continuation.NewContextualizer(ollamaClient, log.Logger)
 
+	var openaiClient llm.Client
+	if cfg.OpenAIApiKey != "" {
+		openaiClient = llm.NewOpenAIClient(cfg.OpenAIApiKey, cfg.OpenAIModel, log.Logger)
+		log.Logger.Info().Msg("OpenAI configured and ready as secondary provider")
+	}
+
+	llmRouter := llm.NewHybridRouter(ollamaClient, openaiClient)
+
 	coreOrch := orchestrator.NewCoreOrchestrator(
 		ragIngest,
 		ragRetrieve,
-		ollamaClient,
+		llmRouter,
 		sqlite,
 		dashboardRepo,
 		memory,

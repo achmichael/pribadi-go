@@ -14,7 +14,7 @@ import (
 	"github.com/achmichael/pribadi-go/internal/repository"
 	"github.com/achmichael/pribadi-go/internal/usecase/rag"
 	"github.com/achmichael/pribadi-go/pkg/crypto"
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 )
@@ -30,7 +30,7 @@ type WebChatService interface {
 	// Messages & Streaming
 	GetSessionHistory(ctx context.Context, sessionID string) ([]domain.WebChatMessage, error)
 	GenerateChatTitle(ctx context.Context, message string) (string, error)
-	StreamChat(ctx context.Context, userID, sessionID, message, model, fileJobID string) (<-chan ollama.StreamChunk, error)
+	StreamChat(ctx context.Context, userID, sessionID, message, model, fileJobID string) (<-chan llm.StreamChunk, error)
 
 	// API Keys
 	SaveAPIKey(ctx context.Context, userID, provider, key string) error
@@ -46,7 +46,7 @@ type WebChatService interface {
 
 type webChatService struct {
 	repo          repository.WebChatRepository
-	ollamaClient  *ollama.OllamaClient
+	llmClient  llm.Client
 	ragIngest     rag.IngestionService
 	ragRetrieve   rag.RetrievalService
 	extraction    ExtractionService
@@ -56,7 +56,7 @@ type webChatService struct {
 
 func NewWebChatService(
 	repo repository.WebChatRepository,
-	ollamaClient *ollama.OllamaClient,
+	llmClient llm.Client,
 	ragIngest rag.IngestionService,
 	ragRetrieve rag.RetrievalService,
 	extraction ExtractionService,
@@ -75,7 +75,7 @@ func NewWebChatService(
 
 	return &webChatService{
 		repo:          repo,
-		ollamaClient:  ollamaClient,
+		llmClient:  llmClient,
 		ragIngest:     ragIngest,
 		ragRetrieve:   ragRetrieve,
 		extraction:    extraction,
@@ -92,7 +92,7 @@ func min(a, b int) int {
 }
 
 func (s *webChatService) GenerateChatTitle(ctx context.Context, message string) (string, error) {
-	response, err := s.ollamaClient.GenerateChatTitle(ctx, message)
+	response, err := s.llmClient.GenerateChatTitle(ctx, message)
 
 	if err != nil {
 		return "", err
@@ -158,7 +158,7 @@ func (s *webChatService) GetSessionHistory(ctx context.Context, sessionID string
 	return s.repo.ListMessages(ctx, sessionID)
 }
 
-func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, message, model, fileJobID string) (<-chan ollama.StreamChunk, error) {
+func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, message, model, fileJobID string) (<-chan llm.StreamChunk, error) {
 	session, err := s.repo.GetSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
@@ -179,21 +179,21 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 	_ = s.repo.CreateMessage(ctx, userMsg)
 
 	history, _ := s.repo.ListMessages(ctx, sessionID)
-	var oMessages []ollama.ChatMessage
+	var oMessages []llm.ChatMessage
 
-	oMessages = append(oMessages, ollama.ChatMessage{
+	oMessages = append(oMessages, llm.ChatMessage{
 		Role:    "system",
 		Content: "You are pribadi-go, a helpful AI assistant. Always respond in Markdown.",
 	})
 
 	for _, m := range history {
-		oMessages = append(oMessages, ollama.ChatMessage{
+		oMessages = append(oMessages, llm.ChatMessage{
 			Role:    m.Role,
 			Content: m.Content,
 		})
 	}
 
-	interceptedStream := make(chan ollama.StreamChunk, 64)
+	interceptedStream := make(chan llm.StreamChunk, 64)
 
 	go func() {
 		defer close(interceptedStream)
@@ -212,8 +212,8 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 				targetDocID = job.DocumentID
 			}
 
-			interceptedStream <- ollama.StreamChunk{
-				Stage: &ollama.StageEvent{Stage: "extracting_file", Message: "Processing attached file..."},
+			interceptedStream <- llm.StreamChunk{
+				Stage: &llm.StageEvent{Stage: "extracting_file", Message: "Processing attached file..."},
 			}
 
 			fileContent := s.waitAndExtractFile(ctx, fileJobID)
@@ -228,8 +228,8 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 			}
 
 			if strings.TrimSpace(fileContent) == "" {
-				interceptedStream <- ollama.StreamChunk{
-					Stage: &ollama.StageEvent{Stage: "file_extracted", Message: "File extraction returned empty content. The file may be unreadable."},
+				interceptedStream <- llm.StreamChunk{
+					Stage: &llm.StageEvent{Stage: "file_extracted", Message: "File extraction returned empty content. The file may be unreadable."},
 				}
 			} else {
 				fileTokens := budget.EstimateTokens(fileContent)
@@ -238,7 +238,7 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 				for _, m := range oMessages {
 					historyTexts = append(historyTexts, m.Content)
 				}
-				calc := budget.NewCalculator(s.ollamaClient.NumCtx(), s.ollamaClient.NumPredict())
+				calc := budget.NewCalculator(s.llmClient.NumCtx(), s.llmClient.NumPredict())
 
 				if calc.FitsInContext(fileTokens, oMessages[0].Content, historyTexts[1:]) {
 					s.logger.Info().
@@ -255,24 +255,24 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 					}
 
 					fileFullInjected = true
-					interceptedStream <- ollama.StreamChunk{
-						Stage: &ollama.StageEvent{Stage: "file_extracted", Message: "File content injected directly (fits in context)"},
+					interceptedStream <- llm.StreamChunk{
+						Stage: &llm.StageEvent{Stage: "file_extracted", Message: "File content injected directly (fits in context)"},
 					}
 				} else {
 					s.logger.Info().
 						Int("file_tokens", fileTokens).
 						Msg("[routing] RAG path: file too large for context, using chunked retrieval")
 
-					interceptedStream <- ollama.StreamChunk{
-						Stage: &ollama.StageEvent{Stage: "file_extracted", Message: "File too large for direct injection, using document search"},
+					interceptedStream <- llm.StreamChunk{
+						Stage: &llm.StageEvent{Stage: "file_extracted", Message: "File too large for direct injection, using document search"},
 					}
 				}
 			}
 		}
 
 		if !fileFullInjected {
-			interceptedStream <- ollama.StreamChunk{
-				Stage: &ollama.StageEvent{Stage: "retrieving_context", Tool: "qdrant_search", Message: "Searching documents..."},
+			interceptedStream <- llm.StreamChunk{
+				Stage: &llm.StageEvent{Stage: "retrieving_context", Tool: "qdrant_search", Message: "Searching documents..."},
 			}
 
 			var pCtx rag.PromptContext
@@ -309,12 +309,12 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 					oMessages[lastIdx].Content = fmt.Sprintf("%s\n\nContext from user documents:\n%s", oMessages[lastIdx].Content, pCtx.Context)
 				}
 
-				interceptedStream <- ollama.StreamChunk{
-					Stage: &ollama.StageEvent{Stage: "context_retrieved", Tool: "qdrant_search", Message: fmt.Sprintf("Found %d relevant chunks", len(strings.Split(pCtx.Context, "\n\n")))},
+				interceptedStream <- llm.StreamChunk{
+					Stage: &llm.StageEvent{Stage: "context_retrieved", Tool: "qdrant_search", Message: fmt.Sprintf("Found %d relevant chunks", len(strings.Split(pCtx.Context, "\n\n")))},
 				}
 			} else {
-				interceptedStream <- ollama.StreamChunk{
-					Stage: &ollama.StageEvent{Stage: "context_retrieved", Message: "No relevant documents found"},
+				interceptedStream <- llm.StreamChunk{
+					Stage: &llm.StageEvent{Stage: "context_retrieved", Message: "No relevant documents found"},
 				}
 			}
 		}
@@ -323,18 +323,18 @@ func (s *webChatService) StreamChat(ctx context.Context, userID, sessionID, mess
 			return
 		}
 
-		interceptedStream <- ollama.StreamChunk{
-			Stage: &ollama.StageEvent{Stage: "generating", Message: "Generating response..."},
+		interceptedStream <- llm.StreamChunk{
+			Stage: &llm.StageEvent{Stage: "generating", Message: "Generating response..."},
 		}
 
-		stream, streamErr := s.ollamaClient.ChatStreamWithThink(ctx, oMessages, nil, true)
+		stream, streamErr := s.llmClient.ChatStreamWithThink(ctx, oMessages, nil, true)
 		if streamErr != nil {
-			interceptedStream <- ollama.StreamChunk{Err: streamErr}
+			interceptedStream <- llm.StreamChunk{Err: streamErr}
 			return
 		}
 
 		var fullContent string
-		var toolCalls []ollama.ToolCall
+		var toolCalls []llm.ToolCall
 		interrupted := false
 
 		for chunk := range stream {

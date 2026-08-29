@@ -1,4 +1,4 @@
-package ollama
+package llm
 
 import (
 	"bufio"
@@ -18,96 +18,8 @@ type ToolRegistry interface {
 	Schemas() []Tool
 }
 
-type Client interface {
-	Chat(ctx context.Context, messages []ChatMessage) (string, error)
-	ChatJSON(ctx context.Context, messages []ChatMessage) (string, error)
-	ChatWithTools(ctx context.Context, messages []ChatMessage, format string) (*ChatResult, error)
-	ChatWithToolsDirect(ctx context.Context, messages []ChatMessage, format string, tools []Tool) (*ChatResult, error)
-	ChatStream(ctx context.Context, messages []ChatMessage, tools []Tool) (<-chan StreamChunk, error)
-	ChatStreamWithThink(ctx context.Context, messages []ChatMessage, tools []Tool, think bool) (<-chan StreamChunk, error)
-	Schemas() []Tool
-	NumCtx() int
-	NumPredict() int
-	GenerateEmbedding(ctx context.Context, text string) ([]float32, error)
-	SimplyChat(ctx context.Context, prompt string) (string, error)
-	GenerateChatTitle(ctx context.Context, message string) (string, error)
-}
 
-type ChatMessage struct {
-	Role      string     `json:"role"`
-	Content   string     `json:"content"`
-	Thinking  string     `json:"thinking,omitempty"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
-}
 
-type Tool struct {
-	Type     string   `json:"type"`
-	Function Function `json:"function"`
-}
-
-type Function struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
-}
-
-type ToolCall struct {
-	Function ToolCallFunction `json:"function"`
-}
-
-type ToolCallFunction struct {
-	Name      string                 `json:"name"`
-	Arguments map[string]interface{} `json:"arguments"`
-}
-
-type chatRequest struct {
-	Model     string         `json:"model"`
-	Messages  []ChatMessage  `json:"messages"`
-	Stream    bool           `json:"stream"`
-	Format    string         `json:"format,omitempty"`
-	Think     bool 			 `json:"think"`
-	Tools     []Tool         `json:"tools,omitempty"`
-	Options   map[string]any `json:"options,omitempty"`
-	KeepAlive string         `json:"keep_alive,omitempty"`
-}
-
-type chatResponse struct {
-	Message    ChatMessage `json:"message"`
-	Done       bool        `json:"done"`
-	DoneReason string      `json:"done_reason,omitempty"`
-}
-
-type ChatResult struct {
-	Content    string
-	ToolCalls  []ToolCall
-	DoneReason string
-}
-
-type StageEvent struct {
-	Stage   string `json:"stage"`
-	Tool    string `json:"tool,omitempty"`
-	Message string `json:"message,omitempty"`
-}
-
-type StreamChunk struct {
-	Content    string
-	Thinking   string
-	ToolCalls  []ToolCall
-	Stage      *StageEvent
-	Done       bool
-	DoneReason string
-	Err        error
-}
-
-type embeddingRequest struct {
-	Model     string `json:"model"`
-	Prompt    string `json:"prompt"`
-	KeepAlive string `json:"keep_alive,omitempty"`
-}
-
-type embeddingResponse struct {
-	Embedding []float32 `json:"embedding"`
-}
 
 type OllamaClient struct {
 	baseURL      string
@@ -119,7 +31,7 @@ type OllamaClient struct {
 	toolRegistry ToolRegistry
 }
 
-type SimplyChatOptions struct {
+type xxxSimplyChatOptions struct {
 	NumPredict int
 	NumCtx int
 	Temperature float64
@@ -133,7 +45,7 @@ func defaultSimplyChatOptions() SimplyChatOptions {
 	}
 }
 
-func NewClient(baseURL, model string, numCtx, numPredict int, logger *zerolog.Logger, registry ToolRegistry) *OllamaClient {
+func NewOllamaClient(baseURL, model string, numCtx, numPredict int, logger *zerolog.Logger, registry ToolRegistry) *OllamaClient {
 	if numCtx <= 0 {
 		numCtx = 4096
 	}
@@ -196,7 +108,7 @@ func (c *OllamaClient) GenerateChatTitle(ctx context.Context, message string) (s
 	- No quotation marks
 	- Return only the title.
 	- Title must using language that same as the prompt
-Text: %s`, message)
+Text: %s`, message, message)
 
 	return c.SimplyChat(ctx, prompt)
 }

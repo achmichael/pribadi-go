@@ -13,7 +13,7 @@ import (
 
 	"github.com/achmichael/pribadi-go/internal/classifier"
 	"github.com/achmichael/pribadi-go/internal/domain"
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/rs/zerolog"
 )
 
@@ -63,12 +63,12 @@ type PlanParams struct {
 // ─── Implementation ────────────────────────────────────────────────
 
 type planner struct {
-	llm    *ollama.OllamaClient
+	llm    llm.Client
 	logger *zerolog.Logger
 }
 
 // NewPlanner creates a Planner.
-func NewPlanner(llm *ollama.OllamaClient, logger *zerolog.Logger) Planner {
+func NewPlanner(llm llm.Client, logger *zerolog.Logger) Planner {
 	return &planner{
 		llm:    llm,
 		logger: logger,
@@ -190,7 +190,7 @@ Return ONLY valid JSON:
   "confidence": "high|medium|low"
 }`, classJSON, params.UserText, params.HasActiveDoc, params.TurnCount)
 
-	messages := []ollama.ChatMessage{
+	messages := []llm.ChatMessage{
 		{Role: "user", Content: prompt},
 	}
 

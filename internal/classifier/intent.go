@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/rs/zerolog"
 )
 
@@ -89,12 +89,12 @@ type ClassifyParams struct {
 // ─── Implementation ────────────────────────────────────────────────
 
 type intentClassifier struct {
-	llm    *ollama.OllamaClient
+	llm    llm.Client
 	logger *zerolog.Logger
 }
 
 // NewIntentClassifier creates an IntentClassifier.
-func NewIntentClassifier(llm *ollama.OllamaClient, logger *zerolog.Logger) IntentClassifier {
+func NewIntentClassifier(llm llm.Client, logger *zerolog.Logger) IntentClassifier {
 	return &intentClassifier{
 		llm:    llm,
 		logger: logger,
@@ -173,7 +173,7 @@ func (c *intentClassifier) Classify(ctx context.Context, params ClassifyParams) 
 		params.UserText,
 	)
 
-	messages := []ollama.ChatMessage{
+	messages := []llm.ChatMessage{
 		{Role: "user", Content: prompt},
 	}
 

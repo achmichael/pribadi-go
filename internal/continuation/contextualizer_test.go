@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -15,39 +15,39 @@ type MockOllamaClient struct {
 	mock.Mock
 }
 
-func (m *MockOllamaClient) Chat(ctx context.Context, messages []ollama.ChatMessage) (string, error) {
+func (m *MockOllamaClient) Chat(ctx context.Context, messages []llm.ChatMessage) (string, error) {
 	args := m.Called(ctx, messages)
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockOllamaClient) ChatJSON(ctx context.Context, messages []ollama.ChatMessage) (string, error) {
+func (m *MockOllamaClient) ChatJSON(ctx context.Context, messages []llm.ChatMessage) (string, error) {
 	args := m.Called(ctx, messages)
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockOllamaClient) ChatWithTools(ctx context.Context, messages []ollama.ChatMessage, format string) (*ollama.ChatResult, error) {
+func (m *MockOllamaClient) ChatWithTools(ctx context.Context, messages []llm.ChatMessage, format string) (*llm.ChatResult, error) {
 	args := m.Called(ctx, messages, format)
-	return args.Get(0).(*ollama.ChatResult), args.Error(1)
+	return args.Get(0).(*llm.ChatResult), args.Error(1)
 }
 
-func (m *MockOllamaClient) ChatWithToolsDirect(ctx context.Context, messages []ollama.ChatMessage, format string, tools []ollama.Tool) (*ollama.ChatResult, error) {
+func (m *MockOllamaClient) ChatWithToolsDirect(ctx context.Context, messages []llm.ChatMessage, format string, tools []llm.Tool) (*llm.ChatResult, error) {
 	args := m.Called(ctx, messages, format, tools)
-	return args.Get(0).(*ollama.ChatResult), args.Error(1)
+	return args.Get(0).(*llm.ChatResult), args.Error(1)
 }
 
-func (m *MockOllamaClient) ChatStream(ctx context.Context, messages []ollama.ChatMessage, tools []ollama.Tool) (<-chan ollama.StreamChunk, error) {
+func (m *MockOllamaClient) ChatStream(ctx context.Context, messages []llm.ChatMessage, tools []llm.Tool) (<-chan llm.StreamChunk, error) {
 	args := m.Called(ctx, messages, tools)
-	return args.Get(0).(<-chan ollama.StreamChunk), args.Error(1)
+	return args.Get(0).(<-chan llm.StreamChunk), args.Error(1)
 }
 
-func (m *MockOllamaClient) ChatStreamWithThink(ctx context.Context, messages []ollama.ChatMessage, tools []ollama.Tool, think bool) (<-chan ollama.StreamChunk, error) {
+func (m *MockOllamaClient) ChatStreamWithThink(ctx context.Context, messages []llm.ChatMessage, tools []llm.Tool, think bool) (<-chan llm.StreamChunk, error) {
 	args := m.Called(ctx, messages, tools, think)
-	return args.Get(0).(<-chan ollama.StreamChunk), args.Error(1)
+	return args.Get(0).(<-chan llm.StreamChunk), args.Error(1)
 }
 
-func (m *MockOllamaClient) Schemas() []ollama.Tool {
+func (m *MockOllamaClient) Schemas() []llm.Tool {
 	args := m.Called()
-	return args.Get(0).([]ollama.Tool)
+	return args.Get(0).([]llm.Tool)
 }
 
 func (m *MockOllamaClient) NumCtx() int {

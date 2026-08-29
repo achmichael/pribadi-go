@@ -20,7 +20,7 @@ import (
 	"github.com/achmichael/pribadi-go/internal/repository"
 	"github.com/achmichael/pribadi-go/internal/response"
 	"github.com/achmichael/pribadi-go/internal/usecase/rag"
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/achmichael/pribadi-go/pkg/utils"
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
@@ -64,11 +64,11 @@ const highConfidenceThreshold = 0.90
 type coreOrchestrator struct {
 	ragIngest     rag.IngestionService
 	ragRetrieve   rag.RetrievalService
-	ollama        *ollama.OllamaClient
+	llmRouter        llm.Router
 	repo          repository.Repository
 	dashboardRepo repository.DashboardRepository
 	memory        factmemory.MemoryManager
-	embedder      *utils.OllamaEmbedder
+	embedder      *utils.Embedder
 
 	stateManager      conversation.StateManager
 	prefManager       conversation.PreferenceManager
@@ -89,11 +89,11 @@ type coreOrchestrator struct {
 func NewCoreOrchestrator(
 	ragIngest rag.IngestionService,
 	ragRetrieve rag.RetrievalService,
-	ollamaClient *ollama.OllamaClient,
+	llmRouter llm.Router,
 	repo repository.Repository,
 	dashboardRepo repository.DashboardRepository,
 	memory factmemory.MemoryManager,
-	embedder *utils.OllamaEmbedder,
+	embedder *utils.Embedder,
 	stateManager conversation.StateManager,
 	prefManager conversation.PreferenceManager,
 	intentClassifier classifier.IntentClassifier,
@@ -110,7 +110,7 @@ func NewCoreOrchestrator(
 	o := &coreOrchestrator{
 		ragIngest:         ragIngest,
 		ragRetrieve:       ragRetrieve,
-		ollama:            ollamaClient,
+		llmRouter:        llmRouter,
 		repo:              repo,
 		dashboardRepo:     dashboardRepo,
 		memory:            memory,
@@ -416,7 +416,7 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 				// Format a prompt forcing the LLM to just answer the user's specific question based on the metadata block.
 				systemPrompt := `Anda adalah asisten cerdas yang menjawab pertanyaan pengguna HANYA berdasarkan konteks metadata berikut. Jangan mengarang informasi di luar konteks ini. Jawab dengan ramah dan natural (tone: casual), jangan terlihat kaku seperti robot. Jawab langsung pada inti pertanyaannya saja.`
 				
-				messages := []ollama.ChatMessage{
+				messages := []llm.ChatMessage{
 					{Role: "system", Content: systemPrompt + "\n\nKONTEKS METADATA:\n" + metadataContext},
 					{Role: "user", Content: userText},
 				}
@@ -427,11 +427,13 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 					Stage: "generating",
 				})
 
-				streamCh, streamErr := o.ollama.ChatStream(ctx, messages, nil)
+				// Let's use default client for metadata operations
+				activeLLM := o.llmRouter.GetDefaultClient()
+				streamCh, streamErr := activeLLM.ChatStream(ctx, messages, nil)
 				var rawResponse string
 
 				if streamErr != nil {
-					result, err := o.ollama.ChatWithTools(ctx, messages, "")
+					result, err := activeLLM.ChatWithTools(ctx, messages, "")
 					if err != nil {
 						o.logger.Error().Err(err).Msg("[orchestrator] constrained LLM generation failed")
 						return err
@@ -493,16 +495,20 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 
 	contextStart := time.Now()
 	var skipRAG, skipMemory bool
-	var toolSchemas []ollama.Tool
+	var toolSchemas []llm.Tool
 
+	var activeLLM llm.Client
 	if isContinuation {
 		skipRAG = true
 		skipMemory = true
 		toolSchemas = nil
 		
+		activeLLM = o.llmRouter.GetDefaultClient()
 		o.logger.Info().Msg("[orchestrator] CONTINUE mode: skipping RAG/memory, preparing verbatim history")
 	} else {
-		switch strategy {
+		activeLLM, _ = o.llmRouter.GetClient(o.llmRouter.Route(decision.Intent, !skipRAG, !skipMemory))
+		
+	switch strategy {
 		case StrategySkipAll:
 			skipRAG = true
 			skipMemory = true
@@ -511,12 +517,12 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		case StrategyAgentic:
 			skipRAG = true
 			skipMemory = true
-			toolSchemas = o.ollama.Schemas()
+			toolSchemas = activeLLM.Schemas()
 
 		case StrategyPrefetch:
 			skipRAG = false
 			skipMemory = false
-			toolSchemas = o.ollama.Schemas()
+			toolSchemas = activeLLM.Schemas()
 		}
 	}
 
@@ -565,29 +571,29 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		}
 	}
 
-	var messages []ollama.ChatMessage
+	var messages []llm.ChatMessage
 	
 	if isContinuation {
-		messages = []ollama.ChatMessage{
+		messages = []llm.ChatMessage{
 			{Role: "system", Content: "Kamu adalah asisten AI yang membantu user. Lanjutkan jawabanmu sebelumnya persis dari titik terakhir. Jangan mengulang bagian yang sudah kamu sampaikan sebelumnya."},
 		}
 		
 		for _, h := range convHistory {
-			messages = append(messages, ollama.ChatMessage{
+			messages = append(messages, llm.ChatMessage{
 				Role:    h.Role,
 				Content: h.Content,
 			})
 		}
 		
 		if lastAssistantWasTruncated && lastAssistantContent != "" {
-			messages = append(messages, ollama.ChatMessage{
+			messages = append(messages, llm.ChatMessage{
 				Role:    "assistant",
 				Content: lastAssistantContent,
 			})
 			o.logger.Info().Msg("[orchestrator] using assistant prefill for truncated continuation")
 		}
 		
-		messages = append(messages, ollama.ChatMessage{
+		messages = append(messages, llm.ChatMessage{
 			Role:    "user",
 			Content: userText,
 		})
@@ -603,7 +609,7 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 			return fmt.Errorf("prompt composer: %w", err)
 		}
 
-		messages = []ollama.ChatMessage{
+		messages = []llm.ChatMessage{
 			{Role: "system", Content: composed.SystemPrompt},
 			{Role: "user", Content: composed.UserPrompt},
 		}
@@ -624,12 +630,12 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		Stage: "generating",
 	})
 
-	streamCh, streamErr := o.ollama.ChatStream(ctx, messages, toolSchemas)
+	streamCh, streamErr := activeLLM.ChatStream(ctx, messages, toolSchemas)
 	var rawResponse string
 
 	if streamErr != nil {
 		o.logger.Warn().Err(streamErr).Msg("[orchestrator] stream failed, falling back to non-stream")
-		result, err := o.ollama.ChatWithTools(ctx, messages, "")
+		result, err := activeLLM.ChatWithTools(ctx, messages, "")
 		if err != nil {
 			llmDur := time.Since(llmStart)
 			o.logger.Error().Err(err).Dur("ms", llmDur).Msg("[orchestrator] Ollama generation failed")
@@ -641,7 +647,7 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		lastDoneReason = result.DoneReason
 
 		if len(result.ToolCalls) > 0 {
-			rawResponse, llmCallCount, err = o.handleToolCalls(ctx, messages, result.ToolCalls, msg.UserID, userText, targetDocID, llmCallCount, out)
+			rawResponse, llmCallCount, err = o.handleToolCalls(ctx, messages, result.ToolCalls, msg.UserID, userText, targetDocID, llmCallCount, out, activeLLM)
 			if err != nil {
 				o.interactionLogger.LogError(ctx, msg.UserID, msg.SessionID, userText, err.Error(), time.Since(handleStart).Milliseconds())
 				return err
@@ -650,7 +656,7 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 	} else {
 		llmCallCount++
 		var fullContent strings.Builder
-		var accumulatedToolCalls []ollama.ToolCall
+		var accumulatedToolCalls []llm.ToolCall
 
 		for chunk := range streamCh {
 			if chunk.Err != nil {
@@ -674,7 +680,7 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 		}
 
 		if len(accumulatedToolCalls) > 0 {
-			rawResponse, llmCallCount, err = o.handleToolCalls(ctx, messages, accumulatedToolCalls, msg.UserID, userText, targetDocID, llmCallCount, out)
+			rawResponse, llmCallCount, err = o.handleToolCalls(ctx, messages, accumulatedToolCalls, msg.UserID, userText, targetDocID, llmCallCount, out, activeLLM)
 			if err != nil {
 				o.interactionLogger.LogError(ctx, msg.UserID, msg.SessionID, userText, err.Error(), time.Since(handleStart).Milliseconds())
 				return err
@@ -850,12 +856,12 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 	return nil
 }
 
-func (o *coreOrchestrator) handleToolCalls(ctx context.Context, messages []ollama.ChatMessage, toolCalls []ollama.ToolCall, userID, ragQuery, targetDocID string, callCount int, out OutboundAdapter) (string, int, error) {
-	currentMessages := make([]ollama.ChatMessage, len(messages))
+func (o *coreOrchestrator) handleToolCalls(ctx context.Context, messages []llm.ChatMessage, toolCalls []llm.ToolCall, userID, ragQuery, targetDocID string, callCount int, out OutboundAdapter, activeLLM llm.Client) (string, int, error) {
+	currentMessages := make([]llm.ChatMessage, len(messages))
 	copy(currentMessages, messages)
 
 	for iteration := 0; iteration < maxToolIterations && len(toolCalls) > 0; iteration++ {
-		currentMessages = append(currentMessages, ollama.ChatMessage{
+		currentMessages = append(currentMessages, llm.ChatMessage{
 			Role:      "assistant",
 			ToolCalls: toolCalls,
 		})
@@ -867,13 +873,13 @@ func (o *coreOrchestrator) handleToolCalls(ctx context.Context, messages []ollam
 			})
 
 			toolResult := o.executeToolCall(ctx, tc, userID, ragQuery, targetDocID)
-			currentMessages = append(currentMessages, ollama.ChatMessage{
+			currentMessages = append(currentMessages, llm.ChatMessage{
 				Role:    "tool",
 				Content: toolResult,
 			})
 		}
 
-		result, err := o.ollama.ChatWithTools(ctx, currentMessages, "")
+		result, err := activeLLM.ChatWithTools(ctx, currentMessages, "")
 		callCount++
 		if err != nil {
 			return "", callCount, fmt.Errorf("tool follow-up call: %w", err)
@@ -885,7 +891,7 @@ func (o *coreOrchestrator) handleToolCalls(ctx context.Context, messages []ollam
 		toolCalls = result.ToolCalls
 	}
 
-	lastResult, err := o.ollama.ChatWithToolsDirect(ctx, currentMessages, "", nil)
+	lastResult, err := activeLLM.ChatWithToolsDirect(ctx, currentMessages, "", nil)
 	callCount++
 	if err != nil {
 		return "", callCount, fmt.Errorf("final call after tool cap: %w", err)
@@ -893,7 +899,7 @@ func (o *coreOrchestrator) handleToolCalls(ctx context.Context, messages []ollam
 	return lastResult.Content, callCount, nil
 }
 
-func (o *coreOrchestrator) executeToolCall(ctx context.Context, tc ollama.ToolCall, userID, ragQuery, targetDocID string) string {
+func (o *coreOrchestrator) executeToolCall(ctx context.Context, tc llm.ToolCall, userID, ragQuery, targetDocID string) string {
 	o.logger.Info().
 		Str("tool", tc.Function.Name).
 		Msg("[orchestrator] executing tool call")
@@ -1002,13 +1008,14 @@ Jawab HANYA dalam format JSON murni, tanpa markdown, tanpa basa-basi, tanpa penj
 
 TEKS DOKUMEN UNTUK DIANALISIS:
 ` + extractText
-	metaMessages := []ollama.ChatMessage{
+	metaMessages := []llm.ChatMessage{
 		{Role: "user", Content: metaPrompt},
 	}
 
 	var parsedMeta DocMeta
 	var metaJSON string
-	metaReply, err := o.ollama.ChatJSON(ctx, metaMessages)
+	activeLLM := o.llmRouter.GetDefaultClient()
+	metaReply, err := activeLLM.ChatJSON(ctx, metaMessages)
 	if err == nil {
 		cleanReply := strings.TrimSpace(metaReply)
 		if strings.HasPrefix(cleanReply, "```json") {
@@ -1058,7 +1065,7 @@ TEKS DOKUMEN UNTUK DIANALISIS:
 	metadata["uploaded_at"] = time.Now().UTC().Format(time.RFC3339)
 
 	fileTokens := budget.EstimateTokens(text)
-	calc := budget.NewCalculator(o.ollama.NumCtx(), o.ollama.NumPredict())
+	calc := budget.NewCalculator(activeLLM.NumCtx(), activeLLM.NumPredict())
 	var count int
 
 	var metaDataObj map[string]interface{}
@@ -1354,11 +1361,12 @@ IMPORTANT: Return ONLY a valid JSON object with the following structure, and no 
 	Current User Query: %s
 	`, docRegistry.String(), history.String(), userText)
 
-	messages := []ollama.ChatMessage{
+	messages := []llm.ChatMessage{
 		{Role: "user", Content: prompt},
 	}
 
-	reply, err := o.ollama.ChatJSON(ctx, messages)
+	activeLLM := o.llmRouter.GetDefaultClient()
+	reply, err := activeLLM.ChatJSON(ctx, messages)
 	if err != nil {
 		o.logger.Error().Err(err).Msg("[orchestrator] reference resolution LLM call failed")
 		return userText, ""

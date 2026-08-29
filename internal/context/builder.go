@@ -17,7 +17,7 @@ import (
 	"github.com/achmichael/pribadi-go/internal/prompt"
 	"github.com/achmichael/pribadi-go/internal/repository"
 	"github.com/achmichael/pribadi-go/internal/usecase/rag"
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/rs/zerolog"
 )
 
@@ -58,7 +58,7 @@ type builder struct {
 	ragRetrieve  rag.RetrievalService
 	repo         repository.Repository
 	dashRepo     repository.DashboardRepository
-	llm          *ollama.OllamaClient
+	llm          llm.Client
 	logger       *zerolog.Logger
 }
 
@@ -70,7 +70,7 @@ func NewBuilder(
 	ragRetrieve rag.RetrievalService,
 	repo repository.Repository,
 	dashRepo repository.DashboardRepository,
-	llm *ollama.OllamaClient,
+	llm llm.Client,
 	logger *zerolog.Logger,
 ) Builder {
 	return &builder{

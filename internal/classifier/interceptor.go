@@ -10,7 +10,7 @@ import (
 	"github.com/achmichael/pribadi-go/internal/conversation"
 	"github.com/achmichael/pribadi-go/internal/domain"
 	"github.com/achmichael/pribadi-go/internal/repository"
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/rs/zerolog"
 )
 
@@ -42,7 +42,7 @@ type interceptor struct {
 	stateManager conversation.StateManager
 	prefManager  conversation.PreferenceManager
 	logger       *zerolog.Logger
-	llm          *ollama.OllamaClient
+	llm          llm.Client
 	dashRepo     repository.DashboardRepository
 }
 
@@ -51,7 +51,7 @@ func NewInterceptor(
 	stateManager conversation.StateManager,
 	prefManager conversation.PreferenceManager,
 	logger *zerolog.Logger,
-	llm *ollama.OllamaClient,
+	llm llm.Client,
 	dashRepo repository.DashboardRepository,
 ) Interceptor {
 	return &interceptor{
@@ -211,7 +211,7 @@ Pengguna baru saja memberikan instruksi atau informasi pribadi. Sistem telah men
 Berikan respons SINGKAT (maksimal 1-2 kalimat) untuk mengonfirmasi bahwa Anda telah mengingat informasi tersebut. 
 Berespons secara natural dan hangat sesuai pedoman gaya bahasa Anda. Jangan mengulangi format sistem (jangan gunakan bullet point atau tanda panah). Langsung berikan balasan percakapan.`, personaName, personaDesc, voiceGuide, joinAcks(ackParts))
 
-	messages := []ollama.ChatMessage{
+	messages := []llm.ChatMessage{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userText},
 	}

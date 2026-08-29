@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/achmichael/pribadi-go/internal/repository"
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/achmichael/pribadi-go/pkg/utils"
 	"github.com/google/uuid"
 	pb "github.com/qdrant/go-client/qdrant"
@@ -72,8 +72,8 @@ const (
 
 type manager struct {
 	repo        repository.Repository
-	embedder    *utils.OllamaEmbedder
-	llm         *ollama.OllamaClient
+	embedder    *utils.Embedder
+	llm         llm.Client
 	conn        *grpc.ClientConn
 	points      pb.PointsClient
 	collections pb.CollectionsClient
@@ -92,7 +92,7 @@ type syncJob struct {
 // qdrantAddr is "host:port" (gRPC), e.g. "localhost:6334".
 func NewMemoryManager(
 	repo repository.Repository,
-	llm *ollama.OllamaClient,
+	llm llm.Client,
 	qdrantAddr string,
 	ollamaBaseURL string,
 	logger *zerolog.Logger,
@@ -107,7 +107,7 @@ func NewMemoryManager(
 
 	m := &manager{
 		repo:        repo,
-		embedder:    utils.NewOllamaEmbedder(ollamaBaseURL, "nomic-embed-text"),
+		embedder:    utils.NewEmbedder(ollamaBaseURL, "nomic-embed-text"),
 		llm:         llm,
 		conn:        conn,
 		points:      pb.NewPointsClient(conn),
@@ -426,7 +426,7 @@ func (m *manager) extractFacts(ctx context.Context, userMsg, assistantMsg string
 	}
 
 	prompt := fmt.Sprintf(extractionPrompt, userMsg, assistantMsg)
-	messages := []ollama.ChatMessage{
+	messages := []llm.ChatMessage{
 		{Role: "user", Content: prompt},
 	}
 

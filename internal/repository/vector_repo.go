@@ -36,7 +36,7 @@ type qdrantVectorRepo struct {
 	conn        *grpc.ClientConn
 	points      pb.PointsClient
 	collections pb.CollectionsClient
-	embedder    *utils.OllamaEmbedder
+	embedder    *utils.Embedder
 	collName    string
 	vectorSize  uint64
 	logger      *zerolog.Logger
@@ -64,7 +64,7 @@ func NewVectorRepository(qdrantAddr string, ollamaBaseURL string, logger *zerolo
 	pointsClient := pb.NewPointsClient(conn)
 	collectionsClient := pb.NewCollectionsClient(conn)
 
-	embedder := utils.NewOllamaEmbedder(ollamaBaseURL, "nomic-embed-text")
+	embedder := utils.NewEmbedder(ollamaBaseURL, "nomic-embed-text")
 
 	collName := "documents"
 	const vectorSize uint64 = 768 // nomic-embed-text dimension

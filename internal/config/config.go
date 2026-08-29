@@ -28,6 +28,8 @@ type Config struct {
 	EncryptionKey    string `envconfig:"ENCRYPTION_KEY" required:"true"`
 	PostgresDSN      string `envconfig:"POSTGRES_DSN" default:"postgres://app_dev:secretpass_local@localhost:5432/app_private_db?sslmode=disable"`
 	TelegramToken    string `envconfig:"TELEGRAM_TOKEN" default:""`
+	OpenAIApiKey     string `envconfig:"OPENAI_API_KEY" default:""`
+	OpenAIModel      string `envconfig:"OPENAI_MODEL" default:"gpt-4o-mini"`
 }
 
 // Load reads configuration from .env file and environment variables

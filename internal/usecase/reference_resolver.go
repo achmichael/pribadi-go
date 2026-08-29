@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/achmichael/pribadi-go/internal/repository"
-	"github.com/achmichael/pribadi-go/pkg/ollama"
+	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/rs/zerolog"
 )
 
@@ -16,12 +16,12 @@ type ReferenceResolver interface {
 }
 
 type referenceResolver struct {
-	llm    *ollama.OllamaClient
+	llm    llm.Client
 	repo   repository.Repository
 	logger *zerolog.Logger
 }
 
-func NewReferenceResolver(llm *ollama.OllamaClient, repo repository.Repository, logger *zerolog.Logger) ReferenceResolver {
+func NewReferenceResolver(llm llm.Client, repo repository.Repository, logger *zerolog.Logger) ReferenceResolver {
 	return &referenceResolver{
 		llm:    llm,
 		repo:   repo,
@@ -113,7 +113,7 @@ func (r *referenceResolver) ResolveQuery(ctx context.Context, userID, userText, 
 
 	// 3. Prepare prompt
 	prompt := fmt.Sprintf(referenceResolutionPrompt, docRegistry.String(), history.String(), userText)
-	messages := []ollama.ChatMessage{
+	messages := []llm.ChatMessage{
 		{Role: "user", Content: prompt},
 	}
 
