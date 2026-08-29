@@ -138,7 +138,7 @@ func NewClient(baseURL, model string, numCtx, numPredict int, logger *zerolog.Lo
 		numCtx = 4096
 	}
 	if numPredict <= 0 {
-		numPredict = 800
+		numPredict = 2048
 	}
 	return &OllamaClient{
 		baseURL:      baseURL,
