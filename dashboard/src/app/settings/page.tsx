@@ -219,6 +219,8 @@ export default function SettingsPage() {
   };
   const handlePurgeDocuments = async () => {
     try {
+
+      console.log('method ')
       await fetchApi('/chat/uploads', { method: 'DELETE' });
       setUploads([]);
       alert('All document vectors and files have been cleared successfully.');

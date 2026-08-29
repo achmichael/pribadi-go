@@ -240,12 +240,12 @@ export function Sidebar() {
             
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button
+                <div
                   onClick={(e) => e.stopPropagation()}
-                  className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+                  className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors cursor-pointer"
                 >
                   <MoreHorizontal className="h-3 w-3" />
-                </button>
+                </div>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-40 bg-zinc-950/95 backdrop-blur-xl border-zinc-800/80 text-zinc-300 shadow-xl rounded-lg text-xs">
                 <DropdownMenuItem onClick={(e) => handleAction(e as any, 'rename', s)} className="gap-2 cursor-pointer focus:bg-zinc-800 focus:text-zinc-100 py-1.5">
