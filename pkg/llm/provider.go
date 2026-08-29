@@ -12,4 +12,5 @@ type Router interface {
 	Route(intent string, needsRAG, needsMemory bool) Provider
 	GetClient(provider Provider) (Client, error)
 	GetDefaultClient() Client
+	AddProvider(provider Provider, client Client)
 }

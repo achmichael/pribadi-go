@@ -1,6 +1,9 @@
 package llm
 
+import "sync"
+
 type hybridRouter struct {
+	mu     sync.RWMutex
 	ollama Client
 	openai Client
 	// can add gemini, claude, etc.
@@ -13,7 +16,20 @@ func NewHybridRouter(ollama Client, openai Client) Router {
 	}
 }
 
+func (r *hybridRouter) AddProvider(provider Provider, client Client) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	switch provider {
+	case ProviderOpenAI:
+		r.openai = client
+	}
+}
+
 func (r *hybridRouter) Route(intent string, needsRAG, needsMemory bool) Provider {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	// Selective routing logic (zero data exposure)
 	// If the task involves personal documents (RAG) or personal memory, ALWAYS use local (Ollama)
 	if needsRAG || needsMemory {
@@ -34,6 +50,9 @@ func (r *hybridRouter) Route(intent string, needsRAG, needsMemory bool) Provider
 }
 
 func (r *hybridRouter) GetClient(provider Provider) (Client, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
 	switch provider {
 	case ProviderOllama:
 		return r.ollama, nil
@@ -48,5 +67,7 @@ func (r *hybridRouter) GetClient(provider Provider) (Client, error) {
 }
 
 func (r *hybridRouter) GetDefaultClient() Client {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.ollama
 }

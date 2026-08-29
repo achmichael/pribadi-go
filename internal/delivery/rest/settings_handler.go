@@ -25,19 +25,27 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 	hasOpenAIKey := openAIKey != ""
 	hasAnthropicKey := anthropicKey != ""
 
+	// Get specific model configurations
+	openAIModel, _ := s.webChatService.GetAPIKey(ctx, userID, "openai_model")
+	anthropicModel, _ := s.webChatService.GetAPIKey(ctx, userID, "anthropic_model")
+
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"system_prompt":     systemPrompt,
 		"has_openai_key":    hasOpenAIKey,
 		"has_anthropic_key": hasAnthropicKey,
+		"openai_model":      openAIModel,
+		"anthropic_model":   anthropicModel,
 	})
 }
 
-// handleChatSettings handles saving BYOK and custom system prompts
+// handleChatSettings handles saving BYOK, custom models and custom system prompts
 func (s *Server) handleChatSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		SystemPrompt string `json:"system_prompt,omitempty"`
-		OpenAIKey    string `json:"openai_key,omitempty"`
-		AnthropicKey string `json:"anthropic_key,omitempty"`
+		SystemPrompt   string `json:"system_prompt,omitempty"`
+		OpenAIKey      string `json:"openai_key,omitempty"`
+		AnthropicKey   string `json:"anthropic_key,omitempty"`
+		OpenAIModel    string `json:"openai_model,omitempty"`
+		AnthropicModel string `json:"anthropic_model,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -57,10 +65,19 @@ func (s *Server) handleChatSettings(w http.ResponseWriter, r *http.Request) {
 	if req.OpenAIKey != "" {
 		_ = s.webChatService.SaveAPIKey(ctx, userID, "openai", req.OpenAIKey)
 	}
+	if req.OpenAIModel != "" {
+		_ = s.webChatService.SaveAPIKey(ctx, userID, "openai_model", req.OpenAIModel)
+	}
 
 	if req.AnthropicKey != "" {
 		_ = s.webChatService.SaveAPIKey(ctx, userID, "anthropic", req.AnthropicKey)
 	}
+	if req.AnthropicModel != "" {
+		_ = s.webChatService.SaveAPIKey(ctx, userID, "anthropic_model", req.AnthropicModel)
+	}
+
+	// Hot-reload router for this user (Ideally should be handled internally in Orchestrator upon new request,
+	// but we can just let Orchestrator fetch the keys dynamically when building the router).
 
 	respondJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }

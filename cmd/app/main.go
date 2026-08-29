@@ -153,6 +153,8 @@ func main() {
 		ragRetrieve,
 		llmRouter,
 		sqlite,
+		webChatRepo,
+		cfg.EncryptionKey,
 		dashboardRepo,
 		memory,
 		embedder,

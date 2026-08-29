@@ -19,6 +19,7 @@ import (
 	"github.com/achmichael/pribadi-go/internal/reasoning"
 	"github.com/achmichael/pribadi-go/internal/repository"
 	"github.com/achmichael/pribadi-go/internal/response"
+	"github.com/achmichael/pribadi-go/pkg/crypto"
 	"github.com/achmichael/pribadi-go/internal/usecase/rag"
 	"github.com/achmichael/pribadi-go/pkg/llm"
 	"github.com/achmichael/pribadi-go/pkg/utils"
@@ -64,9 +65,11 @@ const highConfidenceThreshold = 0.90
 type coreOrchestrator struct {
 	ragIngest     rag.IngestionService
 	ragRetrieve   rag.RetrievalService
-	llmRouter        llm.Router
+	llmRouter     llm.Router
 	repo          repository.Repository
+	webChatRepo   repository.WebChatRepository
 	dashboardRepo repository.DashboardRepository
+	cryptoKey     []byte
 	memory        factmemory.MemoryManager
 	embedder      *utils.Embedder
 
@@ -91,6 +94,8 @@ func NewCoreOrchestrator(
 	ragRetrieve rag.RetrievalService,
 	llmRouter llm.Router,
 	repo repository.Repository,
+	webChatRepo repository.WebChatRepository,
+	cryptoKey string,
 	dashboardRepo repository.DashboardRepository,
 	memory factmemory.MemoryManager,
 	embedder *utils.Embedder,
@@ -110,8 +115,10 @@ func NewCoreOrchestrator(
 	o := &coreOrchestrator{
 		ragIngest:         ragIngest,
 		ragRetrieve:       ragRetrieve,
-		llmRouter:        llmRouter,
+		llmRouter:         llmRouter,
 		repo:              repo,
+		webChatRepo:       webChatRepo,
+		cryptoKey:         []byte(cryptoKey),
 		dashboardRepo:     dashboardRepo,
 		memory:            memory,
 		embedder:          embedder,
@@ -247,6 +254,29 @@ func confidenceStringToFloat(confidence string) float32 {
 
 func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInboundMessage, out OutboundAdapter) error {
 	handleStart := time.Now()
+	
+	// Dynamic LLM Router per user settings
+	if o.webChatRepo != nil {
+		openAIKeyEnc, err := o.webChatRepo.GetAPIKey(ctx, msg.UserID, "openai")
+		if err == nil && openAIKeyEnc != nil && openAIKeyEnc.EncryptedKey != "" {
+			openAIKeyBytes, _ := crypto.Decrypt(openAIKeyEnc.EncryptedKey, o.cryptoKey)
+			openAIKey := string(openAIKeyBytes)
+			if openAIKey != "" {
+				modelStr := "gpt-4o-mini"
+				modelEnc, _ := o.webChatRepo.GetAPIKey(ctx, msg.UserID, "openai_model")
+				if modelEnc != nil && modelEnc.EncryptedKey != "" {
+					modelBytes, _ := crypto.Decrypt(modelEnc.EncryptedKey, o.cryptoKey)
+					if len(modelBytes) > 0 {
+						modelStr = string(modelBytes)
+					}
+				}
+				
+				client := llm.NewOpenAIClient(openAIKey, modelStr, o.logger)
+				o.llmRouter.AddProvider(llm.ProviderOpenAI, client)
+			}
+		}
+	}
+	
 	o.logger.Info().
 		Str("msg_id", msg.MessageID).
 		Str("user_id", msg.UserID).
