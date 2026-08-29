@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, memo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Send, Square, Sparkles, Terminal, FileText, Database, Wrench, Cpu, CheckCircle2, Network, HardDrive } from "lucide-react";
+import { Send, Square, FileText, Bot, Terminal, ShieldAlert, Zap, Globe, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useChatStore } from "@/store/chat";
@@ -14,11 +14,16 @@ import { FileUpload, type AttachedFile } from "@/components/chat/file-upload";
 import { ThinkingStages } from "@/components/chat/thinking-stages";
 import { motion, AnimatePresence } from "framer-motion";
 
+// Clean, functional brand tokens implemented as Tailwind classes
+// Primary: bg-zinc-900
+// Surface: bg-zinc-900/40 border-zinc-800/60
+// Accent: bg-indigo-500 / text-indigo-400
+// Alert/System: text-amber-500/80
+
 const SUGGESTED_PROMPTS = [
-  { icon: FileText, text: "Summarize the latest document I uploaded" },
-  { icon: Database, text: "Search my Qdrant memory for my preferences" },
-  { icon: Terminal, text: "Write a bash script to parse JSON logs" },
-  { icon: Sparkles, text: "What capabilities do you have?" },
+  { icon: Terminal, text: "Parse latest system logs" },
+  { icon: Globe, text: "Search web for recent API changes" },
+  { icon: ShieldAlert, text: "Audit local project dependencies" },
 ];
 
 async function uploadFile(file: File, signal?: AbortSignal): Promise<string | null> {
@@ -54,10 +59,19 @@ const ChatInput = memo(function ChatInput({
 }) {
   const [input, setInput] = useState("");
   const canSubmit = input.trim() || attachedFile;
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`;
+    }
+  }, [input]);
 
   return (
-    <div className="relative flex flex-col glow-effect rounded-2xl bg-zinc-900/50 backdrop-blur-md border border-white/10 transition-all">
+    <div className="relative flex flex-col rounded-xl bg-zinc-950/80 border border-zinc-800/80 shadow-sm shadow-black/20 focus-within:border-indigo-500/30 focus-within:ring-1 focus-within:ring-indigo-500/10 transition-all backdrop-blur-xl">
       <Textarea
+        ref={textareaRef}
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => {
@@ -65,13 +79,14 @@ const ChatInput = memo(function ChatInput({
             e.preventDefault();
             onSubmit(input);
             setInput("");
+            if (textareaRef.current) textareaRef.current.style.height = "auto";
           }
         }}
-        placeholder="Ask anything..."
-        className="min-h-[56px] max-h-[200px] border-0 focus-visible:ring-0 resize-none bg-transparent py-4 px-4 text-base placeholder:text-zinc-500"
+        placeholder="Type a command or question..."
+        className="min-h-[52px] max-h-[200px] border-0 focus-visible:ring-0 resize-none bg-transparent py-3.5 px-4 text-sm font-sans placeholder:text-zinc-500/70 text-zinc-100"
         rows={1}
       />
-      <div className="flex items-center justify-between p-2">
+      <div className="flex items-center justify-between px-3 pb-3 pt-1">
         <FileUpload
           attachedFile={attachedFile}
           onFileSelect={setAttachedFile}
@@ -81,7 +96,7 @@ const ChatInput = memo(function ChatInput({
           <Button
             onClick={onStop}
             size="icon"
-            className="rounded-xl h-9 w-9 bg-red-500/80 text-white hover:bg-red-500 transition-all duration-300"
+            className="rounded-lg h-8 w-8 bg-zinc-800/80 text-zinc-400 hover:text-red-400 hover:bg-zinc-800 transition-colors border border-transparent hover:border-red-500/20"
           >
             <Square className="h-3.5 w-3.5 fill-current" />
           </Button>
@@ -90,12 +105,13 @@ const ChatInput = memo(function ChatInput({
             onClick={() => {
               onSubmit(input);
               setInput("");
+              if (textareaRef.current) textareaRef.current.style.height = "auto";
             }}
             disabled={!canSubmit}
             size="icon"
-            className={`rounded-xl h-9 w-9 transition-all duration-300 ${canSubmit ? "bg-white text-black hover:bg-zinc-200" : "bg-zinc-800 text-zinc-500"}`}
+            className={`rounded-lg h-8 w-8 transition-colors ${canSubmit ? "bg-indigo-600 text-white hover:bg-indigo-500 shadow-sm" : "bg-zinc-900/50 text-zinc-600 border border-zinc-800/50"}`}
           >
-            <Send className="h-4 w-4" />
+            <Send className="h-3.5 w-3.5" />
           </Button>
         )}
       </div>
@@ -376,185 +392,110 @@ export function ChatArea() {
   };
 
   return (
-    <div className="flex flex-col h-full w-full mx-auto relative overflow-hidden bg-background">
-      <div className="ambient-blob bg-blue-500/20 w-[600px] h-[600px] top-[-200px] right-[10%]"></div>
-      <div className="ambient-blob bg-purple-500/10 w-[500px] h-[500px] bottom-[-100px] left-[5%]"></div>
-
-      <div className="absolute top-0 w-full z-10 px-6 py-4 flex items-center justify-between">
+    <div className="flex flex-col h-full w-full mx-auto relative bg-[#09090b]">
+      <div className="absolute top-0 w-full z-10 px-4 py-3 flex items-center justify-between border-b border-zinc-800/40 bg-[#09090b]/80 backdrop-blur-md">
         <ModelSwitcher model={model} setModel={setModel} />
+        <div className="flex items-center gap-2">
+          <span className="flex h-2 w-2 rounded-full bg-emerald-500/80 shadow-[0_0_8px_rgba(16,185,129,0.4)]"></span>
+          <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Local Engine</span>
+        </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 md:px-8 mt-16 z-10" ref={scrollRef}>
-        <div className="max-w-4xl mx-auto space-y-8 pb-32">
+      <div className="flex-1 overflow-y-auto px-4 mt-[52px]" ref={scrollRef}>
+        <div className="max-w-3xl mx-auto pb-32 pt-8">
           {isLoadingHistory ? (
             <div className="flex justify-center items-center h-full mt-32">
-              <div className="animate-spin h-6 w-6 border-2 border-zinc-500 border-t-transparent rounded-full" />
+              <div className="animate-spin h-5 w-5 border-2 border-indigo-500/30 border-t-indigo-500 rounded-full" />
             </div>
           ) : historyError ? (
-            <div className="flex justify-center items-center h-full mt-32 text-red-400">
-              {historyError}
+            <div className="flex justify-center items-center h-full mt-32 text-amber-500/80 text-sm font-mono">
+              [Error] {historyError}
             </div>
           ) : messages.length === 0 ? (
-            <div className="flex flex-col lg:flex-row gap-12 lg:gap-8 mt-12 md:mt-24 max-w-5xl mx-auto w-full">
-              {/* Left Column: Greeting & Actions */}
+            <div className="flex flex-col items-center mt-16 md:mt-24 max-w-xl mx-auto w-full text-center">
               <motion.div
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.5, ease: "easeOut" }}
-                className="flex-1 flex flex-col justify-start"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4 }}
+                className="mb-8"
               >
-                <h2 className="text-4xl font-medium text-gradient mb-2 tracking-tight">Good evening.</h2>
-                <p className="text-muted-foreground text-sm mb-10 leading-relaxed max-w-md">
-                  I am pribadi-go, your local intelligence. Ready to process documents, execute tools, and retrieve from memory.
-                </p>
-
-                <div className="space-y-2 w-full max-w-md">
-                  {SUGGESTED_PROMPTS.map((prompt, i) => (
-                    <motion.button
-                      key={i}
-                      whileHover={{ scale: 1.01, x: 4 }}
-                      whileTap={{ scale: 0.99 }}
-                      onClick={() => handleSubmit(prompt.text)}
-                      className="group flex items-center justify-between p-3 rounded-lg border border-transparent hover:border-white/10 hover:bg-white/[0.02] transition-all text-left w-full"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-md bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0 group-hover:bg-zinc-800 transition-colors">
-                          <prompt.icon className="h-4 w-4 text-zinc-400 group-hover:text-zinc-200 transition-colors" />
-                        </div>
-                        <span className="text-sm font-medium text-zinc-300 group-hover:text-white transition-colors">{prompt.text}</span>
-                      </div>
-                      <div className="opacity-0 group-hover:opacity-100 text-xs text-zinc-500 font-mono transition-opacity">
-                        ↵
-                      </div>
-                    </motion.button>
-                  ))}
+                <div className="h-12 w-12 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mx-auto mb-6 shadow-sm">
+                  <Terminal className="h-5 w-5 text-indigo-400" />
                 </div>
+                <h2 className="text-xl font-medium text-zinc-200 mb-2 font-sans tracking-tight">System Ready</h2>
+                <p className="text-zinc-500 text-sm font-sans leading-relaxed">
+                  Local intelligence initialized. Ready for execution.
+                </p>
               </motion.div>
 
-              {/* Right Column: System Status */}
-              <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.5, ease: "easeOut", delay: 0.1 }}
-                className="w-full lg:w-72 shrink-0"
+              <motion.div 
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.4, delay: 0.1 }}
+                className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full"
               >
-                <div className="rounded-xl border border-white/5 bg-zinc-950/50 p-5 backdrop-blur-sm space-y-6">
-                  <div>
-                    <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">System Status</h3>
-                    
-                    <div className="space-y-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <Cpu className="h-4 w-4 text-emerald-400" />
-                          <div className="flex flex-col">
-                            <span className="text-sm font-medium text-zinc-200">Local Inference</span>
-                            <span className="text-xs text-zinc-500">qwen3:4b (Ollama)</span>
-                          </div>
-                        </div>
-                        <CheckCircle2 className="h-4 w-4 text-emerald-400/80" />
-                      </div>
-
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <Database className="h-4 w-4 text-blue-400" />
-                          <div className="flex flex-col">
-                            <span className="text-sm font-medium text-zinc-200">Vector Memory</span>
-                            <span className="text-xs text-zinc-500">Qdrant Connected</span>
-                          </div>
-                        </div>
-                        <CheckCircle2 className="h-4 w-4 text-blue-400/80" />
-                      </div>
-
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <HardDrive className="h-4 w-4 text-amber-400" />
-                          <div className="flex flex-col">
-                            <span className="text-sm font-medium text-zinc-200">Storage</span>
-                            <span className="text-xs text-zinc-500">Local File System</span>
-                          </div>
-                        </div>
-                        <CheckCircle2 className="h-4 w-4 text-amber-400/80" />
-                      </div>
-                      
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <Network className="h-4 w-4 text-purple-400" />
-                          <div className="flex flex-col">
-                            <span className="text-sm font-medium text-zinc-200">Tools</span>
-                            <span className="text-xs text-zinc-500">Web, Bash, API</span>
-                          </div>
-                        </div>
-                        <CheckCircle2 className="h-4 w-4 text-purple-400/80" />
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="pt-4 border-t border-zinc-800/50">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="text-zinc-500">Data Privacy</span>
-                      <span className="text-emerald-400 font-medium bg-emerald-400/10 px-2 py-0.5 rounded-full">100% Local</span>
-                    </div>
-                  </div>
-                </div>
+                {SUGGESTED_PROMPTS.map((prompt, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleSubmit(prompt.text)}
+                    className="flex items-center gap-3 p-3 rounded-lg border border-zinc-800/60 bg-zinc-900/30 hover:bg-zinc-800/50 hover:border-zinc-700 transition-all text-left group"
+                  >
+                    <prompt.icon className="h-4 w-4 text-zinc-500 group-hover:text-indigo-400 transition-colors shrink-0" />
+                    <span className="text-xs font-medium text-zinc-400 group-hover:text-zinc-200 transition-colors leading-tight">{prompt.text}</span>
+                  </button>
+                ))}
               </motion.div>
             </div>
           ) : (
-            <AnimatePresence>
+            <AnimatePresence initial={false}>
               {messages.map((m, idx) => {
                 const isLastAssistant =
                   m.role === "assistant" && m.id === messages[messages.length - 1]?.id;
+                const isUser = m.role === "user";
 
                 return (
                   <motion.div
                     key={m.id}
-                    initial={{ opacity: 0, y: 10 }}
+                    initial={{ opacity: 0, y: 5 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="flex gap-4 items-start group"
+                    transition={{ duration: 0.2 }}
+                    className={`flex flex-col w-full mb-8 ${isUser ? 'items-end' : 'items-start'}`}
                   >
-                    <div className="shrink-0 mt-1">
-                      {m.role === "user" ? (
-                        <div className="h-7 w-7 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 border border-white/10">
-                          YOU
+                    {!isUser && (
+                      <div className="flex items-center gap-2 mb-2 ml-1">
+                        <div className="h-5 w-5 rounded md bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
+                          <Bot className="h-3 w-3 text-indigo-400" />
                         </div>
-                      ) : (
-                        <div className="h-7 w-7 rounded-md bg-white text-black flex items-center justify-center shadow-[0_0_15px_rgba(255,255,255,0.1)]">
-                          <Sparkles className="h-4 w-4" />
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex-1 space-y-2 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-zinc-200">
-                          {m.role === "user" ? "You" : "pribadi-go"}
-                        </span>
+                        <span className="text-[11px] font-mono font-medium text-zinc-500 uppercase tracking-wider">pribadi-go</span>
                         {m.interrupted && (
-                          <span className="text-[10px] font-mono text-amber-500/70 border border-amber-500/20 px-1.5 py-0.5 rounded">
-                            stopped
+                          <span className="text-[9px] font-mono text-amber-500/70 border border-amber-500/20 px-1 py-0 rounded uppercase tracking-wider ml-1">
+                            halted
                           </span>
                         )}
                       </div>
+                    )}
 
-                      {m.role === "user" && m.file_name && (
-                        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/50 max-w-[240px] mb-2 mt-1">
+                    <div className={`flex flex-col max-w-[85%] ${isUser ? 'items-end' : 'items-start'}`}>
+                      {isUser && m.file_name && (
+                        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-zinc-800/80 bg-zinc-900/80 mb-2 shadow-sm">
                           {(m as any)._localPreview ||
                           (m.file_mime_type && m.file_mime_type.startsWith("image/")) ? (
                             <img
                               src={(m as any)._localPreview || "/placeholder-image.png"}
                               alt="preview"
-                              className="h-8 w-8 rounded object-cover shrink-0"
+                              className="h-7 w-7 rounded object-cover shrink-0 border border-zinc-800"
                             />
                           ) : (
-                            <div className="h-8 w-8 rounded bg-zinc-800 flex items-center justify-center shrink-0">
-                              <FileText className="h-4 w-4 text-zinc-400" />
+                            <div className="h-7 w-7 rounded bg-zinc-800/80 flex items-center justify-center shrink-0 border border-zinc-700/50">
+                              <FileText className="h-3.5 w-3.5 text-zinc-400" />
                             </div>
                           )}
-                          <div className="flex flex-col min-w-0">
-                            <span className="text-[11px] text-zinc-300 truncate font-medium">
+                          <div className="flex flex-col min-w-0 pr-2">
+                            <span className="text-[11px] text-zinc-200 truncate font-medium">
                               {m.file_name}
                             </span>
                             {m.file_size && (
-                              <span className="text-[10px] text-zinc-500">
+                              <span className="text-[9px] text-zinc-500 font-mono mt-0.5">
                                 {m.file_size < 1024
                                   ? `${m.file_size} B`
                                   : m.file_size < 1024 * 1024
@@ -566,23 +507,25 @@ export function ChatArea() {
                         </div>
                       )}
 
-                      {m.role === "assistant" && (m.stages?.length || m.thinking) && (
-                        <ThinkingStages
-                          stages={m.stages || []}
-                          currentStage={isLastAssistant && isStreaming ? currentStage : null}
-                          thinking={m.thinking}
-                          isActive={isLastAssistant && isStreaming}
-                        />
-                      )}
+                      {!isUser && (m.stages?.length || m.thinking) ? (
+                        <div className="mb-3 w-full">
+                          <ThinkingStages
+                            stages={m.stages || []}
+                            currentStage={isLastAssistant && isStreaming ? currentStage : null}
+                            thinking={m.thinking}
+                            isActive={isLastAssistant && isStreaming}
+                          />
+                        </div>
+                      ) : null}
 
-                      {m.toolCalls && m.toolCalls.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mb-2">
+                      {!isUser && m.toolCalls && m.toolCalls.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mb-3">
                           {m.toolCalls.map((tc, tcIdx) => (
                             <div
                               key={tcIdx}
-                              className="inline-flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 px-2 py-1 rounded-md text-xs text-zinc-400 font-mono"
+                              className="inline-flex items-center gap-1.5 bg-zinc-900/60 border border-zinc-800/60 px-2 py-1 rounded text-[10px] text-zinc-400 font-mono"
                             >
-                              <Wrench className="h-3 w-3" />
+                              <Terminal className="h-2.5 w-2.5 text-zinc-500" />
                               <span>{tc.function.name}</span>
                             </div>
                           ))}
@@ -590,44 +533,65 @@ export function ChatArea() {
                       )}
 
                       {m.content && (
-                        <div className="prose prose-invert prose-sm max-w-none prose-p:leading-relaxed prose-pre:bg-zinc-900 prose-pre:border prose-pre:border-zinc-800">
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                              code({ node, inline, className, children, ...props }: any) {
-                                const match = /language-(\w+)/.exec(className || "");
-                                return !inline ? (
-                                  <div className="relative rounded-lg overflow-hidden my-4 border border-zinc-800 bg-zinc-950">
-                                    <div className="bg-zinc-900 px-4 py-2 flex items-center text-xs text-zinc-400 font-mono border-b border-zinc-800">
-                                      {match?.[1] || "text"}
-                                    </div>
-                                    <pre className="p-4 m-0 overflow-x-auto text-sm font-mono leading-relaxed text-zinc-300">
-                                      <code className={className} {...props}>
+                        <div className={`relative px-4 py-3 text-sm shadow-sm ${
+                          isUser 
+                            ? "bg-zinc-800/80 text-zinc-100 rounded-2xl rounded-tr-sm border border-zinc-700/50" 
+                            : "bg-transparent text-zinc-300 w-full"
+                        }`}>
+                          <div className={`prose prose-sm max-w-none prose-p:leading-relaxed ${
+                            isUser ? 'prose-invert' : 'prose-invert prose-pre:bg-zinc-900/80 prose-pre:border prose-pre:border-zinc-800/60'
+                          }`}>
+                            {isUser ? (
+                                <div className="whitespace-pre-wrap font-sans">{m.content}</div>
+                            ) : (
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                components={{
+                                  code({ node, inline, className, children, ...props }: any) {
+                                    const match = /language-(\w+)/.exec(className || "");
+                                    return !inline ? (
+                                      <div className="relative rounded-lg overflow-hidden my-4 border border-zinc-800/60 bg-zinc-950 shadow-sm">
+                                        <div className="bg-zinc-900/80 px-3 py-1.5 flex items-center text-[10px] text-zinc-400 font-mono uppercase tracking-wider border-b border-zinc-800/60">
+                                          {match?.[1] || "text"}
+                                        </div>
+                                        <pre className="p-3 m-0 overflow-x-auto text-[13px] font-mono leading-relaxed text-zinc-300">
+                                          <code className={className} {...props}>
+                                            {children}
+                                          </code>
+                                        </pre>
+                                      </div>
+                                    ) : (
+                                      <code
+                                        className="bg-zinc-800/60 text-zinc-200 px-1 py-0.5 rounded text-[13px] font-mono border border-zinc-700/50"
+                                        {...props}
+                                      >
                                         {children}
                                       </code>
-                                    </pre>
-                                  </div>
-                                ) : (
-                                  <code
-                                    className="bg-zinc-800/50 text-zinc-200 px-1.5 py-0.5 rounded-md font-mono text-sm border border-zinc-800"
-                                    {...props}
-                                  >
-                                    {children}
-                                  </code>
-                                );
-                              },
-                            }}
-                          >
-                            {m.content}
-                          </ReactMarkdown>
+                                    );
+                                  },
+                                  p({ children }) {
+                                    return <p className="mb-4 last:mb-0 text-[14.5px] text-zinc-300/90">{children}</p>;
+                                  },
+                                  li({ children }) {
+                                    return <li className="text-[14.5px] text-zinc-300/90 marker:text-zinc-500">{children}</li>;
+                                  }
+                                }}
+                              >
+                                {m.content}
+                              </ReactMarkdown>
+                            )}
+                          </div>
+                          
+                          {isStreaming && isLastAssistant && (
+                            <span className="inline-block w-1.5 h-3.5 bg-indigo-500 ml-1 translate-y-[2px] animate-pulse" />
+                          )}
                         </div>
                       )}
-
-                      {isStreaming && isLastAssistant && !m.content && !m.thinking && (
-                        <span className="streaming-cursor" />
-                      )}
-                      {isStreaming && isLastAssistant && m.content && (
-                        <span className="streaming-cursor" />
+                      
+                      {!m.content && !m.thinking && isStreaming && isLastAssistant && (
+                          <div className="px-1 py-2">
+                             <span className="inline-block w-1.5 h-3.5 bg-indigo-500 animate-pulse" />
+                          </div>
                       )}
                     </div>
                   </motion.div>
@@ -638,8 +602,8 @@ export function ChatArea() {
         </div>
       </div>
 
-      <div className="absolute bottom-0 w-full z-20 bg-gradient-to-t from-background via-background to-transparent pt-10 pb-6 px-4 md:px-8">
-        <div className="max-w-4xl mx-auto">
+      <div className="absolute bottom-0 w-full z-20 bg-gradient-to-t from-[#09090b] via-[#09090b]/95 to-transparent pt-8 pb-4 px-4">
+        <div className="max-w-3xl mx-auto">
           <ChatInput
             onSubmit={handleSubmit}
             onStop={handleStop}
@@ -647,9 +611,14 @@ export function ChatArea() {
             attachedFile={attachedFile}
             setAttachedFile={setAttachedFile}
           />
-          <p className="text-[11px] text-center text-zinc-600 mt-3 font-medium">
-            AI can make mistakes. Everything runs locally by default.
-          </p>
+          <div className="flex justify-between items-center mt-2.5 px-1">
+             <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-wider">
+               pribadi-go v0.1.0
+             </p>
+             <p className="text-[10px] text-zinc-600 font-mono uppercase tracking-wider flex items-center gap-1">
+               <ShieldAlert className="h-2.5 w-2.5" /> Local Execution
+             </p>
+          </div>
         </div>
       </div>
     </div>

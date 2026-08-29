@@ -58,47 +58,49 @@ export function FileUpload({ attachedFile, onFileSelect, disabled }: FileUploadP
       />
 
       <Tooltip>
-        <TooltipTrigger>
-          <div
-            className="inline-flex cursor-pointer rounded-xl h-9 w-9 items-center justify-center text-zinc-400 shrink-0 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
+        <TooltipTrigger asChild>
+          <button
+            className="inline-flex cursor-pointer rounded-md h-7 w-7 items-center justify-center text-zinc-500 shrink-0 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
             onClick={(e) => {
               e.preventDefault();
               if (!disabled) fileInputRef.current?.click();
             }}
-            data-disabled={disabled}
+            disabled={disabled}
+            type="button"
           >
-            <Paperclip className="h-4 w-4" />
-          </div>
+            <Paperclip className="h-3.5 w-3.5" />
+          </button>
         </TooltipTrigger>
-        <TooltipContent side="top">Attach file</TooltipContent>
+        <TooltipContent side="top" className="text-xs font-mono">Attach File</TooltipContent>
       </Tooltip>
 
       {attachedFile && (
-        <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg border border-zinc-800 bg-zinc-900/50 max-w-[240px]">
+        <div className="flex items-center gap-2 px-2 py-1 rounded-md border border-indigo-500/20 bg-indigo-500/5 max-w-[200px]">
           {attachedFile.previewUrl ? (
             <img
               src={attachedFile.previewUrl}
               alt="preview"
-              className="h-8 w-8 rounded object-cover shrink-0"
+              className="h-6 w-6 rounded object-cover shrink-0 border border-indigo-500/20"
             />
           ) : (
-            <div className="h-8 w-8 rounded bg-zinc-800 flex items-center justify-center shrink-0">
-              <FileText className="h-4 w-4 text-zinc-400" />
+            <div className="h-6 w-6 rounded bg-indigo-500/10 flex items-center justify-center shrink-0 border border-indigo-500/20">
+              <FileText className="h-3 w-3 text-indigo-400" />
             </div>
           )}
-          <div className="flex flex-col min-w-0">
-            <span className="text-[11px] text-zinc-300 truncate font-medium">
+          <div className="flex flex-col min-w-0 pr-1">
+            <span className="text-[10px] text-indigo-200 truncate font-medium">
               {attachedFile.file.name}
             </span>
-            <span className="text-[10px] text-zinc-500">
+            <span className="text-[9px] text-indigo-400/60 font-mono">
               {formatFileSize(attachedFile.file.size)}
             </span>
           </div>
           <button
+            type="button"
             onClick={handleRemove}
-            className="shrink-0 p-0.5 rounded hover:bg-zinc-700 transition-colors"
+            className="shrink-0 p-0.5 rounded-sm hover:bg-indigo-500/20 text-indigo-400 transition-colors ml-auto"
           >
-            <X className="h-3 w-3 text-zinc-400" />
+            <X className="h-3 w-3" />
           </button>
         </div>
       )}
