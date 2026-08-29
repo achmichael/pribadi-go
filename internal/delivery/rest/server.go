@@ -157,6 +157,7 @@ func NewServer(
 			r.Get("/chat/sessions/{id}/history", srv.handleGetSessionHistory)
 			r.Get("/chat/settings", srv.handleGetChatSettings)
 			r.Put("/chat/settings", srv.handleChatSettings)
+			r.Post("/chat/settings/test", srv.handleTestConnection)
 			r.Get("/chat/uploads", srv.handleListUploads)
 			r.Delete("/chat/uploads", srv.handlePurgeUploads)
 			r.Delete("/chat/uploads/{id}", srv.handleDeleteUpload)

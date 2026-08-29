@@ -5,6 +5,9 @@ type Provider string
 const (
 	ProviderOllama Provider = "ollama"
 	ProviderOpenAI Provider = "openai"
+	ProviderAnthropic Provider = "anthropic"
+	ProviderGemini Provider = "gemini"
+	ProviderGrok Provider = "grok"
 	// add others as needed
 )
 

@@ -3,10 +3,12 @@ package llm
 import "sync"
 
 type hybridRouter struct {
-	mu     sync.RWMutex
-	ollama Client
-	openai Client
-	// can add gemini, claude, etc.
+	mu        sync.RWMutex
+	ollama    Client
+	openai    Client
+	anthropic Client
+	gemini    Client
+	grok      Client
 }
 
 func NewHybridRouter(ollama Client, openai Client) Router {
@@ -23,6 +25,12 @@ func (r *hybridRouter) AddProvider(provider Provider, client Client) {
 	switch provider {
 	case ProviderOpenAI:
 		r.openai = client
+	case ProviderAnthropic:
+		r.anthropic = client
+	case ProviderGemini:
+		r.gemini = client
+	case ProviderGrok:
+		r.grok = client
 	}
 }
 
@@ -40,8 +48,18 @@ func (r *hybridRouter) Route(intent string, needsRAG, needsMemory bool) Provider
 	// E.g., chitchat, general knowledge, translation
 	switch intent {
 	case "chitchat", "ask_information", "clarify", "translation", "summarize_general":
+		// Prioritize providers in some order, e.g., Anthropic > OpenAI > Gemini > Grok
+		if r.anthropic != nil {
+			return ProviderAnthropic
+		}
 		if r.openai != nil {
 			return ProviderOpenAI
+		}
+		if r.gemini != nil {
+			return ProviderGemini
+		}
+		if r.grok != nil {
+			return ProviderGrok
 		}
 	}
 
@@ -58,9 +76,24 @@ func (r *hybridRouter) GetClient(provider Provider) (Client, error) {
 		return r.ollama, nil
 	case ProviderOpenAI:
 		if r.openai == nil {
-			return r.ollama, nil // fallback if not configured
+			return r.ollama, nil
 		}
 		return r.openai, nil
+	case ProviderAnthropic:
+		if r.anthropic == nil {
+			return r.ollama, nil
+		}
+		return r.anthropic, nil
+	case ProviderGemini:
+		if r.gemini == nil {
+			return r.ollama, nil
+		}
+		return r.gemini, nil
+	case ProviderGrok:
+		if r.grok == nil {
+			return r.ollama, nil
+		}
+		return r.grok, nil
 	default:
 		return r.ollama, nil
 	}

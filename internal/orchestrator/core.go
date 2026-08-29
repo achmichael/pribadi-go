@@ -257,6 +257,7 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 	
 	// Dynamic LLM Router per user settings
 	if o.webChatRepo != nil {
+		// OpenAI
 		openAIKeyEnc, err := o.webChatRepo.GetAPIKey(ctx, msg.UserID, "openai")
 		if err == nil && openAIKeyEnc != nil && openAIKeyEnc.EncryptedKey != "" {
 			openAIKeyBytes, _ := crypto.Decrypt(openAIKeyEnc.EncryptedKey, o.cryptoKey)
@@ -270,9 +271,65 @@ func (o *coreOrchestrator) HandleMessage(ctx context.Context, msg *NormalizedInb
 						modelStr = string(modelBytes)
 					}
 				}
-				
 				client := llm.NewOpenAIClient(openAIKey, modelStr, o.logger)
 				o.llmRouter.AddProvider(llm.ProviderOpenAI, client)
+			}
+		}
+
+		// Anthropic
+		anthropicKeyEnc, err := o.webChatRepo.GetAPIKey(ctx, msg.UserID, "anthropic")
+		if err == nil && anthropicKeyEnc != nil && anthropicKeyEnc.EncryptedKey != "" {
+			anthropicKeyBytes, _ := crypto.Decrypt(anthropicKeyEnc.EncryptedKey, o.cryptoKey)
+			anthropicKey := string(anthropicKeyBytes)
+			if anthropicKey != "" {
+				modelStr := "claude-3-haiku-20240307"
+				modelEnc, _ := o.webChatRepo.GetAPIKey(ctx, msg.UserID, "anthropic_model")
+				if modelEnc != nil && modelEnc.EncryptedKey != "" {
+					modelBytes, _ := crypto.Decrypt(modelEnc.EncryptedKey, o.cryptoKey)
+					if len(modelBytes) > 0 {
+						modelStr = string(modelBytes)
+					}
+				}
+				client := llm.NewAnthropicClient(anthropicKey, modelStr, o.logger)
+				o.llmRouter.AddProvider(llm.ProviderAnthropic, client)
+			}
+		}
+
+		// Gemini
+		geminiKeyEnc, err := o.webChatRepo.GetAPIKey(ctx, msg.UserID, "gemini")
+		if err == nil && geminiKeyEnc != nil && geminiKeyEnc.EncryptedKey != "" {
+			geminiKeyBytes, _ := crypto.Decrypt(geminiKeyEnc.EncryptedKey, o.cryptoKey)
+			geminiKey := string(geminiKeyBytes)
+			if geminiKey != "" {
+				modelStr := "gemini-1.5-flash"
+				modelEnc, _ := o.webChatRepo.GetAPIKey(ctx, msg.UserID, "gemini_model")
+				if modelEnc != nil && modelEnc.EncryptedKey != "" {
+					modelBytes, _ := crypto.Decrypt(modelEnc.EncryptedKey, o.cryptoKey)
+					if len(modelBytes) > 0 {
+						modelStr = string(modelBytes)
+					}
+				}
+				client := llm.NewGeminiClient(geminiKey, modelStr, o.logger)
+				o.llmRouter.AddProvider(llm.ProviderGemini, client)
+			}
+		}
+
+		// Grok
+		grokKeyEnc, err := o.webChatRepo.GetAPIKey(ctx, msg.UserID, "grok")
+		if err == nil && grokKeyEnc != nil && grokKeyEnc.EncryptedKey != "" {
+			grokKeyBytes, _ := crypto.Decrypt(grokKeyEnc.EncryptedKey, o.cryptoKey)
+			grokKey := string(grokKeyBytes)
+			if grokKey != "" {
+				modelStr := "grok-beta"
+				modelEnc, _ := o.webChatRepo.GetAPIKey(ctx, msg.UserID, "grok_model")
+				if modelEnc != nil && modelEnc.EncryptedKey != "" {
+					modelBytes, _ := crypto.Decrypt(modelEnc.EncryptedKey, o.cryptoKey)
+					if len(modelBytes) > 0 {
+						modelStr = string(modelBytes)
+					}
+				}
+				client := llm.NewGrokClient(grokKey, modelStr, o.logger)
+				o.llmRouter.AddProvider(llm.ProviderGrok, client)
 			}
 		}
 	}

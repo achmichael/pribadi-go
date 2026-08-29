@@ -21,20 +21,30 @@ func (s *Server) handleGetChatSettings(w http.ResponseWriter, r *http.Request) {
 	// We only return whether the keys exist or not, never the actual keys for security
 	openAIKey, _ := s.webChatService.GetAPIKey(ctx, userID, "openai")
 	anthropicKey, _ := s.webChatService.GetAPIKey(ctx, userID, "anthropic")
+	geminiKey, _ := s.webChatService.GetAPIKey(ctx, userID, "gemini")
+	grokKey, _ := s.webChatService.GetAPIKey(ctx, userID, "grok")
 
 	hasOpenAIKey := openAIKey != ""
 	hasAnthropicKey := anthropicKey != ""
+	hasGeminiKey := geminiKey != ""
+	hasGrokKey := grokKey != ""
 
 	// Get specific model configurations
 	openAIModel, _ := s.webChatService.GetAPIKey(ctx, userID, "openai_model")
 	anthropicModel, _ := s.webChatService.GetAPIKey(ctx, userID, "anthropic_model")
+	geminiModel, _ := s.webChatService.GetAPIKey(ctx, userID, "gemini_model")
+	grokModel, _ := s.webChatService.GetAPIKey(ctx, userID, "grok_model")
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"system_prompt":     systemPrompt,
 		"has_openai_key":    hasOpenAIKey,
 		"has_anthropic_key": hasAnthropicKey,
+		"has_gemini_key":    hasGeminiKey,
+		"has_grok_key":      hasGrokKey,
 		"openai_model":      openAIModel,
 		"anthropic_model":   anthropicModel,
+		"gemini_model":      geminiModel,
+		"grok_model":        grokModel,
 	})
 }
 
@@ -44,8 +54,12 @@ func (s *Server) handleChatSettings(w http.ResponseWriter, r *http.Request) {
 		SystemPrompt   string `json:"system_prompt,omitempty"`
 		OpenAIKey      string `json:"openai_key,omitempty"`
 		AnthropicKey   string `json:"anthropic_key,omitempty"`
+		GeminiKey      string `json:"gemini_key,omitempty"`
+		GrokKey        string `json:"grok_key,omitempty"`
 		OpenAIModel    string `json:"openai_model,omitempty"`
 		AnthropicModel string `json:"anthropic_model,omitempty"`
+		GeminiModel    string `json:"gemini_model,omitempty"`
+		GrokModel      string `json:"grok_model,omitempty"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -74,6 +88,20 @@ func (s *Server) handleChatSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AnthropicModel != "" {
 		_ = s.webChatService.SaveAPIKey(ctx, userID, "anthropic_model", req.AnthropicModel)
+	}
+
+	if req.GeminiKey != "" {
+		_ = s.webChatService.SaveAPIKey(ctx, userID, "gemini", req.GeminiKey)
+	}
+	if req.GeminiModel != "" {
+		_ = s.webChatService.SaveAPIKey(ctx, userID, "gemini_model", req.GeminiModel)
+	}
+
+	if req.GrokKey != "" {
+		_ = s.webChatService.SaveAPIKey(ctx, userID, "grok", req.GrokKey)
+	}
+	if req.GrokModel != "" {
+		_ = s.webChatService.SaveAPIKey(ctx, userID, "grok_model", req.GrokModel)
 	}
 
 	// Hot-reload router for this user (Ideally should be handled internally in Orchestrator upon new request,

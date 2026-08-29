@@ -57,11 +57,51 @@ export default function SettingsPage() {
   // Models State
   const [modelSaving, setModelSaving] = useState(false);
   const [modelChanged, setModelChanged] = useState(false);
+  
+  // External Provider states
+  const [openaiKey, setOpenaiKey] = useState('');
+  const [openaiModel, setOpenaiModel] = useState('');
+  const [anthropicKey, setAnthropicKey] = useState('');
+  const [anthropicModel, setAnthropicModel] = useState('');
+  const [geminiKey, setGeminiKey] = useState('');
+  const [geminiModel, setGeminiModel] = useState('');
+  const [grokKey, setGrokKey] = useState('');
+  const [grokModel, setGrokModel] = useState('');
+  
+  const [hasOpenAIKey, setHasOpenAIKey] = useState(false);
+  const [hasAnthropicKey, setHasAnthropicKey] = useState(false);
+  const [hasGeminiKey, setHasGeminiKey] = useState(false);
+  const [hasGrokKey, setHasGrokKey] = useState(false);
+  
   const [plannerModel, setPlannerModel] = useState('qwen3:4b');
   const [executorModel, setExecutorModel] = useState('qwen3:4b');
   const [diagModel, setDiagModel] = useState('qwen3:4b');
   const [keepAlive, setKeepAlive] = useState([5]);
   const [thinkMode, setThinkMode] = useState({ planner: true, executor: false, diag: false });
+  
+  // Fetch existing config from API on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const data = await fetchApi('/chat/settings');
+        if (data) {
+          if (data.system_prompt) setPersSystemPrompt(data.system_prompt);
+          setHasOpenAIKey(data.has_openai_key || false);
+          setHasAnthropicKey(data.has_anthropic_key || false);
+          setHasGeminiKey(data.has_gemini_key || false);
+          setHasGrokKey(data.has_grok_key || false);
+          
+          if (data.openai_model) setOpenaiModel(data.openai_model);
+          if (data.anthropic_model) setAnthropicModel(data.anthropic_model);
+          if (data.gemini_model) setGeminiModel(data.gemini_model);
+          if (data.grok_model) setGrokModel(data.grok_model);
+        }
+      } catch (err) {
+        console.error("Failed to load settings", err);
+      }
+    };
+    loadSettings();
+  }, []);
   
   // Storage State
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -91,6 +131,102 @@ export default function SettingsPage() {
     }
   }, [activeTab]);
 
+  const [openaiTesting, setOpenaiTesting] = useState(false);
+  const [anthropicTesting, setAnthropicTesting] = useState(false);
+  const [geminiTesting, setGeminiTesting] = useState(false);
+  const [grokTesting, setGrokTesting] = useState(false);
+
+  const handleTestConnection = async (provider: string) => {
+    let key = '';
+    let model = '';
+    let setter = (b: boolean) => {};
+    let hasKey = false;
+
+    if (provider === 'openai') {
+      key = openaiKey; model = openaiModel; setter = setOpenaiTesting; hasKey = hasOpenAIKey;
+    } else if (provider === 'anthropic') {
+      key = anthropicKey; model = anthropicModel; setter = setAnthropicTesting; hasKey = hasAnthropicKey;
+    } else if (provider === 'gemini') {
+      key = geminiKey; model = geminiModel; setter = setGeminiTesting; hasKey = hasGeminiKey;
+    } else if (provider === 'grok') {
+      key = grokKey; model = grokModel; setter = setGrokTesting; hasKey = hasGrokKey;
+    }
+
+    if (!key && !hasKey) {
+      alert("Please enter an API key first");
+      return;
+    }
+
+    setter(true);
+    try {
+      // In a real app we'd fetch the saved key if the input is empty (e.g. they just loaded the page)
+      // For this test endpoint, we need to pass the explicit key. If the field is empty but it says "Configured",
+      // the backend would ideally handle a request without a key by fetching it from the DB. 
+      // To keep it simple, we require them to input the key to test if it's a new one, or if they haven't saved it.
+      if (!key) {
+        alert("Please enter the API key in the field to test (we don't fetch your saved secret key to the frontend for security)");
+        setter(false);
+        return;
+      }
+
+      const res = await fetchApi('/chat/settings/test', {
+        method: 'POST',
+        body: JSON.stringify({
+          provider,
+          api_key: key,
+          model: model
+        })
+      });
+      
+      alert(res.message || "Connection successful!");
+    } catch (err: any) {
+      alert(`Test failed:\n${err.message || "Unknown error"}`);
+    } finally {
+      setter(false);
+    }
+  };
+  
+  const handleModelSave = async () => {
+    setModelSaving(true);
+    try {
+      const payload: any = {};
+      
+      // Add external keys/models to payload if they were touched
+      if (openaiKey) payload.openai_key = openaiKey;
+      if (openaiModel) payload.openai_model = openaiModel;
+      
+      if (anthropicKey) payload.anthropic_key = anthropicKey;
+      if (anthropicModel) payload.anthropic_model = anthropicModel;
+      
+      if (Object.keys(payload).length > 0) {
+        await fetchApi('/chat/settings', {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+        
+        if (openaiKey) setHasOpenAIKey(true);
+        if (anthropicKey) setHasAnthropicKey(true);
+        if (geminiKey) setHasGeminiKey(true);
+        if (grokKey) setHasGrokKey(true);
+      }
+      
+      setModelChanged(false);
+    } catch (err) {
+      console.error("Failed to save models config", err);
+    } finally {
+      setModelSaving(false);
+    }
+  };
+  const handlePurgeDocuments = async () => {
+    try {
+      await fetchApi('/chat/uploads', { method: 'DELETE' });
+      setUploads([]);
+      alert('All document vectors and files have been cleared successfully.');
+    } catch (err) {
+      console.error("Failed to purge documents", err);
+      alert('Failed to clear document vectors.');
+    }
+  };
   const handleDeleteUpload = async (id: string) => {
     try {
       await fetchApi(`/chat/uploads/${id}`, { method: 'DELETE' });
@@ -295,99 +431,263 @@ export default function SettingsPage() {
             <div>
               <h3 className="text-lg font-medium text-white flex items-center gap-2">
                 Models Configuration
-                {modelChanged && <span className="text-[10px] uppercase font-bold bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full ml-2 tracking-wider">Restart Required</span>}
+                {modelChanged && <span className="text-[10px] uppercase font-bold bg-amber-500/20 text-amber-500 px-2 py-0.5 rounded-full ml-2 tracking-wider">Unsaved Changes</span>}
               </h3>
-              <p className="text-sm text-zinc-400">Configure local Ollama models for different roles.</p>
+              <p className="text-sm text-zinc-400">Configure local Ollama and external cloud models.</p>
             </div>
 
-            <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 flex flex-col gap-2">
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Live Resource Usage</span>
-                <span className="text-xs text-zinc-300 font-mono">3.1 GB / 4.0 GB VRAM</span>
-              </div>
-              <div className="h-2 w-full bg-zinc-950 rounded-full overflow-hidden">
-                <div className="h-full bg-emerald-400 w-[77%]"></div>
-              </div>
-              {/* TODO: connect to /api/system/resources */}
-            </div>
-            
-            <div className="space-y-6">
-              {[
-                { label: 'Planner Model', val: plannerModel, setter: setPlannerModel, key: 'planner', think: thinkMode.planner },
-                { label: 'Executor Model', val: executorModel, setter: setExecutorModel, key: 'executor', think: thinkMode.executor },
-                { label: 'Diagnostician Model', val: diagModel, setter: setDiagModel, key: 'diag', think: thinkMode.diag }
-              ].map((item) => (
-                <div key={item.key} className="space-y-2 p-4 border border-zinc-800/50 rounded-lg bg-zinc-900/20">
-                  <div className="flex justify-between items-start mb-2">
-                    <Label className="text-zinc-200">{item.label}</Label>
-                    <div className="flex items-center space-x-2">
-                      <Switch 
-                        checked={item.think} 
-                        onCheckedChange={(v) => {
-                          setThinkMode({...thinkMode, [item.key]: v});
-                          setModelChanged(true);
-                        }} 
-                        className="data-[state=checked]:bg-emerald-500"
-                      />
-                      <Label className="text-xs text-zinc-400">Think Mode</Label>
+            <Accordion type="single" collapsible defaultValue="local" className="w-full space-y-4">
+              <AccordionItem value="local" className="border border-zinc-800/50 rounded-lg bg-zinc-900/10 px-4">
+                <AccordionTrigger className="hover:no-underline py-4">
+                  <div className="flex items-center gap-3 text-white">
+                    <Cpu className="h-5 w-5 text-emerald-400" />
+                    <div className="text-left">
+                      <div className="font-medium">Local Models (Ollama)</div>
+                      <div className="text-xs text-zinc-500 font-normal mt-0.5">Primary execution (Zero Data Exposure)</div>
                     </div>
                   </div>
-                  <Select value={item.val} onValueChange={(v) => { item.setter(v); setModelChanged(true); }}>
-                    <SelectTrigger className="w-full bg-zinc-900 border-zinc-800 text-zinc-300">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200">
-                      <SelectItem value="qwen3:4b" className="focus:bg-zinc-900 focus:text-white">qwen3:4b (Local)</SelectItem>
-                      <SelectItem value="llama3:8b" className="focus:bg-zinc-900 focus:text-white">llama3:8b (Local)</SelectItem>
-                      {/* TODO: populate from /api/system/models */}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ))}
-
-              <div className="space-y-4 pt-2">
-                <div className="flex justify-between items-center">
-                  <Label className="text-zinc-300">Keep Alive Duration: {keepAlive[0]}m</Label>
-                </div>
-                <Slider 
-                  value={keepAlive} 
-                  onValueChange={(v) => { setKeepAlive(v); setModelChanged(true); }}
-                  max={60} 
-                  step={5}
-                  className="py-2"
-                />
-                <p className="text-xs text-zinc-500">Longer keep alive consumes VRAM constantly but prevents cold-start delays.</p>
-              </div>
-
-              <Accordion type="single" collapsible className="w-full">
-                <AccordionItem value="advanced" className="border-zinc-800">
-                  <AccordionTrigger className="text-sm font-medium text-zinc-300 hover:text-white hover:no-underline">
-                    Advanced Settings
-                  </AccordionTrigger>
-                  <AccordionContent className="text-zinc-400 space-y-4 pt-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label>Temperature</Label>
-                        <Input type="number" defaultValue="0.7" step="0.1" className="bg-zinc-900 border-zinc-800" onChange={() => setModelChanged(true)} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Top P</Label>
-                        <Input type="number" defaultValue="0.9" step="0.1" className="bg-zinc-900 border-zinc-800" onChange={() => setModelChanged(true)} />
-                      </div>
+                </AccordionTrigger>
+                <AccordionContent className="pt-2 pb-4 space-y-6">
+                  <div className="bg-zinc-950/50 border border-zinc-800/50 rounded-xl p-4 flex flex-col gap-2 mb-6">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Live Resource Usage</span>
+                      <span className="text-xs text-zinc-300 font-mono">3.1 GB / 4.0 GB VRAM</span>
                     </div>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
+                    <div className="h-2 w-full bg-zinc-900 rounded-full overflow-hidden">
+                      <div className="h-full bg-emerald-400 w-[77%]"></div>
+                    </div>
+                  </div>
+                  
+                  {[
+                    { label: 'Planner Model', val: plannerModel, setter: setPlannerModel, key: 'planner', think: thinkMode.planner },
+                    { label: 'Executor Model', val: executorModel, setter: setExecutorModel, key: 'executor', think: thinkMode.executor },
+                    { label: 'Diagnostician Model', val: diagModel, setter: setDiagModel, key: 'diag', think: thinkMode.diag }
+                  ].map((item) => (
+                    <div key={item.key} className="space-y-2 p-4 border border-zinc-800/50 rounded-lg bg-zinc-950">
+                      <div className="flex justify-between items-start mb-2">
+                        <Label className="text-zinc-200">{item.label}</Label>
+                        <div className="flex items-center space-x-2">
+                          <Switch 
+                            checked={item.think} 
+                            onCheckedChange={(v) => {
+                              setThinkMode({...thinkMode, [item.key]: v});
+                              setModelChanged(true);
+                            }} 
+                            className="data-[state=checked]:bg-emerald-500"
+                          />
+                          <Label className="text-xs text-zinc-400">Think Mode</Label>
+                        </div>
+                      </div>
+                      <Select value={item.val} onValueChange={(v) => { item.setter(v); setModelChanged(true); }}>
+                        <SelectTrigger className="w-full bg-zinc-900 border-zinc-800 text-zinc-300">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200">
+                          <SelectItem value="qwen3:4b" className="focus:bg-zinc-900 focus:text-white">qwen3:4b (Local)</SelectItem>
+                          <SelectItem value="llama3:8b" className="focus:bg-zinc-900 focus:text-white">llama3:8b (Local)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
 
-              <div className="pt-6 border-t border-zinc-800/50">
-                <Button 
-                  disabled={!modelChanged || modelSaving}
-                  onClick={() => { setModelSaving(true); setTimeout(() => { setModelSaving(false); setModelChanged(false); }, 1000); }}
-                  className="bg-white text-black hover:bg-zinc-200 disabled:bg-zinc-800 disabled:text-zinc-500"
-                >
-                  {modelSaving ? "Applying..." : "Apply Changes"}
-                </Button>
-              </div>
+                  <div className="space-y-4 pt-2">
+                    <div className="flex justify-between items-center">
+                      <Label className="text-zinc-300">Keep Alive Duration: {keepAlive[0]}m</Label>
+                    </div>
+                    <Slider 
+                      value={keepAlive} 
+                      onValueChange={(v) => { setKeepAlive(v); setModelChanged(true); }}
+                      max={60} 
+                      step={5}
+                      className="py-2"
+                    />
+                    <p className="text-xs text-zinc-500">Longer keep alive consumes VRAM constantly but prevents cold-start delays.</p>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+
+              <AccordionItem value="cloud" className="border border-zinc-800/50 rounded-lg bg-zinc-900/10 px-4">
+                <AccordionTrigger className="hover:no-underline py-4">
+                  <div className="flex items-center gap-3 text-white">
+                    <Globe className="h-5 w-5 text-blue-400" />
+                    <div className="text-left">
+                      <div className="font-medium">Cloud Providers (Hybrid Routing)</div>
+                      <div className="text-xs text-zinc-500 font-normal mt-0.5">Used selectively for non-sensitive generic tasks</div>
+                    </div>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="pt-2 pb-4 space-y-6">
+                  <div className="space-y-4 p-4 border border-zinc-800/50 rounded-lg bg-zinc-950">
+                    <div className="flex items-center justify-between mb-2">
+                      <Label className="text-zinc-200 text-base">OpenAI Configuration</Label>
+                      {hasOpenAIKey && <span className="text-[10px] font-medium text-emerald-400 uppercase tracking-wider bg-emerald-500/10 px-2 py-1 rounded">Saved</span>}
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label className="text-zinc-400 text-xs">API Key</Label>
+                      <Input 
+                        type="password"
+                        placeholder={hasOpenAIKey ? "••••••••••••••••••••••••••••••••" : "sk-..."}
+                        value={openaiKey}
+                        onChange={(e) => { setOpenaiKey(e.target.value); setModelChanged(true); }}
+                        className="bg-zinc-900 border-zinc-800 text-zinc-300 font-mono text-sm"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label className="text-zinc-400 text-xs">Model</Label>
+                      <Input 
+                        placeholder="e.g. gpt-4o-mini (default)"
+                        value={openaiModel}
+                        onChange={(e) => { setOpenaiModel(e.target.value); setModelChanged(true); }}
+                        className="bg-zinc-900 border-zinc-800 text-zinc-300 font-mono text-sm"
+                      />
+                    </div>
+                    
+                    <div className="pt-2 flex justify-end">
+                       <Button 
+                        variant="outline" 
+                        size="sm" 
+                        disabled={openaiTesting || (!openaiKey && !hasOpenAIKey)}
+                        onClick={() => handleTestConnection('openai')}
+                        className="bg-zinc-900 border-zinc-700 text-zinc-300 hover:text-white"
+                      >
+                        {openaiTesting ? "Testing..." : "Test Connection"}
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-4 p-4 border border-zinc-800/50 rounded-lg bg-zinc-950">
+                    <div className="flex items-center justify-between mb-2">
+                      <Label className="text-zinc-200 text-base">Anthropic</Label>
+                      {hasAnthropicKey && <span className="text-[10px] font-medium text-emerald-400 uppercase tracking-wider bg-emerald-500/10 px-2 py-1 rounded">Saved</span>}
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label className="text-zinc-400 text-xs">API Key</Label>
+                      <Input 
+                        type="password"
+                        placeholder={hasAnthropicKey ? "••••••••••••••••••••••••••••••••" : "sk-ant-..."}
+                        value={anthropicKey}
+                        onChange={(e) => { setAnthropicKey(e.target.value); setModelChanged(true); }}
+                        className="bg-zinc-900 border-zinc-800 text-zinc-300 font-mono text-sm"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label className="text-zinc-400 text-xs">Model</Label>
+                      <Input 
+                        placeholder="e.g. claude-3-haiku-20240307 (default)"
+                        value={anthropicModel}
+                        onChange={(e) => { setAnthropicModel(e.target.value); setModelChanged(true); }}
+                        className="bg-zinc-900 border-zinc-800 text-zinc-300 font-mono text-sm"
+                      />
+                    </div>
+                    
+                    <div className="pt-2 flex justify-end">
+                       <Button 
+                        variant="outline" 
+                        size="sm" 
+                        disabled={anthropicTesting || (!anthropicKey && !hasAnthropicKey)}
+                        onClick={() => handleTestConnection('anthropic')}
+                        className="bg-zinc-900 border-zinc-700 text-zinc-300 hover:text-white"
+                      >
+                        {anthropicTesting ? "Testing..." : "Test Connection"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 p-4 border border-zinc-800/50 rounded-lg bg-zinc-950">
+                    <div className="flex items-center justify-between mb-2">
+                      <Label className="text-zinc-200 text-base">Google Gemini</Label>
+                      {hasGeminiKey && <span className="text-[10px] font-medium text-emerald-400 uppercase tracking-wider bg-emerald-500/10 px-2 py-1 rounded">Saved</span>}
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label className="text-zinc-400 text-xs">API Key</Label>
+                      <Input 
+                        type="password"
+                        placeholder={hasGeminiKey ? "••••••••••••••••••••••••••••••••" : "AIzaSy..."}
+                        value={geminiKey}
+                        onChange={(e) => { setGeminiKey(e.target.value); setModelChanged(true); }}
+                        className="bg-zinc-900 border-zinc-800 text-zinc-300 font-mono text-sm"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label className="text-zinc-400 text-xs">Model</Label>
+                      <Input 
+                        placeholder="e.g. gemini-1.5-flash (default)"
+                        value={geminiModel}
+                        onChange={(e) => { setGeminiModel(e.target.value); setModelChanged(true); }}
+                        className="bg-zinc-900 border-zinc-800 text-zinc-300 font-mono text-sm"
+                      />
+                    </div>
+                    
+                    <div className="pt-2 flex justify-end">
+                       <Button 
+                        variant="outline" 
+                        size="sm" 
+                        disabled={geminiTesting || (!geminiKey && !hasGeminiKey)}
+                        onClick={() => handleTestConnection('gemini')}
+                        className="bg-zinc-900 border-zinc-700 text-zinc-300 hover:text-white"
+                      >
+                        {geminiTesting ? "Testing..." : "Test Connection"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 p-4 border border-zinc-800/50 rounded-lg bg-zinc-950">
+                    <div className="flex items-center justify-between mb-2">
+                      <Label className="text-zinc-200 text-base">xAI Grok</Label>
+                      {hasGrokKey && <span className="text-[10px] font-medium text-emerald-400 uppercase tracking-wider bg-emerald-500/10 px-2 py-1 rounded">Saved</span>}
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label className="text-zinc-400 text-xs">API Key</Label>
+                      <Input 
+                        type="password"
+                        placeholder={hasGrokKey ? "••••••••••••••••••••••••••••••••" : "xai-..."}
+                        value={grokKey}
+                        onChange={(e) => { setGrokKey(e.target.value); setModelChanged(true); }}
+                        className="bg-zinc-900 border-zinc-800 text-zinc-300 font-mono text-sm"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label className="text-zinc-400 text-xs">Model</Label>
+                      <Input 
+                        placeholder="e.g. grok-beta (default)"
+                        value={grokModel}
+                        onChange={(e) => { setGrokModel(e.target.value); setModelChanged(true); }}
+                        className="bg-zinc-900 border-zinc-800 text-zinc-300 font-mono text-sm"
+                      />
+                    </div>
+                    
+                    <div className="pt-2 flex justify-end">
+                       <Button 
+                        variant="outline" 
+                        size="sm" 
+                        disabled={grokTesting || (!grokKey && !hasGrokKey)}
+                        onClick={() => handleTestConnection('grok')}
+                        className="bg-zinc-900 border-zinc-700 text-zinc-300 hover:text-white"
+                      >
+                        {grokTesting ? "Testing..." : "Test Connection"}
+                      </Button>
+                    </div>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+
+            <div className="pt-6 border-t border-zinc-800/50">
+              <Button 
+                disabled={!modelChanged || modelSaving}
+                onClick={handleModelSave}
+                className="bg-white text-black hover:bg-zinc-200 disabled:bg-zinc-800 disabled:text-zinc-500 w-full sm:w-auto"
+              >
+                {modelSaving ? "Saving Configuration..." : "Save Model Configuration"}
+              </Button>
             </div>
           </div>
         );
@@ -658,10 +958,15 @@ export default function SettingsPage() {
                                 This will remove the file from storage and its vectors from Qdrant.
                               </AlertDialogDescription>
                             </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel className="bg-zinc-900 border-zinc-800">Cancel</AlertDialogCancel>
-                              <AlertDialogAction className="bg-red-500 text-white">Delete</AlertDialogAction>
-                            </AlertDialogFooter>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel className="bg-zinc-900 border-zinc-800">Cancel</AlertDialogCancel>
+                          <AlertDialogAction 
+                            onClick={handlePurgeDocuments}
+                            className="bg-red-500 text-white hover:bg-red-600"
+                          >
+                            Clear Data
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
                           </AlertDialogContent>
                         </AlertDialog>
                       </TableCell>
@@ -700,10 +1005,15 @@ export default function SettingsPage() {
                           Delete threads older than 30 days?
                         </AlertDialogDescription>
                       </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel className="bg-zinc-900 border-zinc-800">Cancel</AlertDialogCancel>
-                        <AlertDialogAction className="bg-red-500 text-white">Delete</AlertDialogAction>
-                      </AlertDialogFooter>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel className="bg-zinc-900 border-zinc-800">Cancel</AlertDialogCancel>
+                          <AlertDialogAction 
+                            onClick={(e) => { e.preventDefault(); handlePurgeDocuments(); }}
+                            className="bg-red-500 text-white hover:bg-red-600"
+                          >
+                            Clear Data
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>
                 </div>

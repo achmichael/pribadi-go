@@ -17,8 +17,19 @@ type OpenAIClient struct {
 }
 
 func NewOpenAIClient(apiKey, model string, logger *zerolog.Logger) *OpenAIClient {
+	config := openai.DefaultConfig(apiKey)
 	return &OpenAIClient{
-		client: openai.NewClient(apiKey),
+		client: openai.NewClientWithConfig(config),
+		model:  model,
+		logger: logger,
+	}
+}
+
+func NewOpenAIClientWithBaseURL(apiKey, model, baseURL string, logger *zerolog.Logger) *OpenAIClient {
+	config := openai.DefaultConfig(apiKey)
+	config.BaseURL = baseURL
+	return &OpenAIClient{
+		client: openai.NewClientWithConfig(config),
 		model:  model,
 		logger: logger,
 	}
