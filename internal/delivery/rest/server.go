@@ -60,6 +60,8 @@ type Server struct {
 
 	coreOrchestrator  orchestrator.CoreOrchestrator
 	webInboundAdapter orchestrator.InboundAdapter
+
+	monitorHandler *MonitorHandler
 }
 
 func (s *Server) Router() *chi.Mux {
@@ -76,6 +78,7 @@ func NewServer(
 	jwtSecret string,
 	logger *zerolog.Logger,
 	port string,
+	monitorHandler *MonitorHandler,
 ) *Server {
 	r := chi.NewRouter()
 
@@ -107,6 +110,7 @@ func NewServer(
 		rateLimiter:       newRateLimiter(),
 		coreOrchestrator:  coreOrchestrator,
 		webInboundAdapter: webInboundAdapter,
+		monitorHandler:    monitorHandler,
 	}
 
 	// Routes
@@ -148,6 +152,11 @@ func NewServer(
 			r.Post("/stocks", srv.handleAddStock)
 			r.Put("/stocks/{id}", srv.handleUpdateStock)
 			r.Delete("/stocks/{id}", srv.handleDeleteStock)
+
+			// Monitors
+			if srv.monitorHandler != nil {
+				srv.monitorHandler.RegisterRoutes(r)
+			}
 
 			// Chat (Web UI) - non-streaming
 			r.Get("/chat/sessions", srv.handleGetSessions)

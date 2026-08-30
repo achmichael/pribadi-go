@@ -16,6 +16,7 @@ import (
 	contextpkg "github.com/achmichael/pribadi-go/internal/context"
 	"github.com/achmichael/pribadi-go/internal/delivery/scheduler"
 	"github.com/achmichael/pribadi-go/internal/delivery/rest"
+	"github.com/achmichael/pribadi-go/internal/domain"
 	"github.com/achmichael/pribadi-go/internal/tools"
 	"github.com/achmichael/pribadi-go/internal/delivery/telegram"
 	"github.com/achmichael/pribadi-go/internal/delivery/webhook"
@@ -31,6 +32,7 @@ import (
 	"github.com/achmichael/pribadi-go/internal/usecase"
 	"github.com/achmichael/pribadi-go/internal/usecase/rag"
 	"github.com/achmichael/pribadi-go/internal/usecase/reminder"
+	"github.com/achmichael/pribadi-go/internal/usecase/monitor"
     authrepo "github.com/achmichael/pribadi-go/internal/auth/repository"
     authinfra "github.com/achmichael/pribadi-go/internal/auth/infrastructure"
     authuc "github.com/achmichael/pribadi-go/internal/auth/usecase"
@@ -222,7 +224,28 @@ func main() {
 
 	// Create default user if not exists
 	_ = dashboardService.CreateDefaultUser(context.Background(), "admin", "admin123")
-	
+
+	// Monitor Engine
+	monitorRepo := repository.NewMonitorRepository(sqlite.GetDB())
+	httpConnector := monitor.NewHTTPConnector(cfg.EncryptionKey)
+	scrapeExtractor := monitor.NewScrapeRuleExtractor(ollamaClient, monitorRepo)
+	scrapeConnector := monitor.NewScrapeConnector(monitorRepo, scrapeExtractor)
+	structuralEval := monitor.NewStructuralEvaluator()
+	nlJudgeEval := monitor.NewNLJudgeEvaluator(ollamaClient, monitorRepo, monitorRepo, monitorRepo, log.Logger)
+	monitorNotifier := monitor.NewNotifier(ollamaClient)
+	monitorDelivery := monitor.NewMultiDelivery(waClient, log.Logger)
+
+	providers := map[domain.SourceType]domain.DataSourceProvider{
+		domain.SourceHTTPAPI:   httpConnector,
+		domain.SourceWebScrape: scrapeConnector,
+	}
+	evaluators := map[domain.ConditionMode]domain.ConditionEvaluator{
+		domain.ConditionStructural: structuralEval,
+		domain.ConditionNLJudge:    nlJudgeEval,
+	}
+	monitorAgent := monitor.NewAgent(monitorRepo, monitorRepo, providers, evaluators, monitorNotifier, monitorDelivery, log.Logger)
+	monitorHandler := rest.NewMonitorHandler(monitorRepo, httpConnector, scrapeExtractor)
+
 	dashboardServer := rest.NewServer(
 		dashboardService,
 		webChatService,
@@ -232,6 +255,7 @@ func main() {
 		cfg.DashboardJWT,
 		log.Logger,
 		cfg.DashboardPort,
+		monitorHandler,
 	)
 
     // Auth Module setup
@@ -254,12 +278,14 @@ func main() {
 	// Scheduler
 	sched, _ := scheduler.NewReminderScheduler(waClient, sqlite, log.Logger)
 	dashboardSched := scheduler.NewDashboardCronScheduler(dashboardRepo, waClient, log.Logger)
+	monitorSched := scheduler.NewMonitorScheduler(monitorAgent, log.Logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go whServer.Start(ctx)
 	go dashboardServer.Start(ctx)
 	go sched.Start(ctx)
 	go dashboardSched.Start(ctx)
+	go monitorSched.Start(ctx)
 
 	log.Info().Msg("Application started")
 
